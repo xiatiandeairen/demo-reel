@@ -107,7 +107,43 @@ class CameraPlan(unittest.TestCase):
         act = activity_with([(1, 9, TOP_LEFT)])
         beats = [Beat(2, 4, focus=[TOP_LEFT]), Beat(4, 6, focus=[TOP_LEFT]), Beat(6, 9, focus=[TOP_LEFT])]
         shots, _ = motion.plan(beats, act, 10)
-        self.assertEqual(len(shots), 3)  # start, then one move into the pane
+        framings = [(s["x"], s["y"], s["zoom"]) for s in shots]
+        changes = sum(1 for a, b in zip(framings, framings[1:]) if a != b)
+        self.assertEqual(changes, 2)  # one move into the pane, one back to full at the end
+
+    # CASE-B2.1
+    def test_tight_framing_zooms_on_the_changed_line_not_the_whole_pane(self):
+        line = (120, 300, 900, 360)  # one line of output near the top of the top-left pane
+        act = activity_with([(1, 4, line)])
+        pane_cam = motion.frame(TOP_LEFT, W, H)
+        shots, _ = motion.plan([Beat(1, 4, focus=[TOP_LEFT], tight=True)], act, 10)
+        cam = max(shots, key=lambda s: s["zoom"])
+        self.assertGreater(cam["zoom"], pane_cam["zoom"])
+        half_w = W / cam["zoom"] / 2
+        self.assertLessEqual(cam["x"] - half_w, TOP_LEFT[0] + 1)  # left edge of the pane stays in view
+        self.assertGreaterEqual(cam["x"] + half_w, line[2] - W / SMALL_W)
+
+    # CASE-B2
+    def test_film_ends_on_the_whole_stage(self):
+        act = activity_with([(1, 4, TOP_LEFT)])
+        shots, _ = motion.plan([Beat(1, 8, focus=[TOP_LEFT])], act, 10)
+        self.assertEqual(shots[-1]["zoom"], 1.0)
+        self.assertGreater(len(shots), 3)
+
+    # CASE-B2
+    def test_main_film_ends_on_full_even_when_later_steps_zoom_in(self):
+        act = activity_with([(1, 4, TOP_LEFT), (6, 9, BOTTOM_RIGHT)])
+        beats = [Beat(1, 5, focus=[TOP_LEFT]), Beat(5, 9, focus=[BOTTOM_RIGHT])]
+        shots, _ = motion.plan(beats, act, 10, end_full_at=5.0)
+        before_end = [s for s in shots if s["t"] <= 5.0]
+        self.assertEqual(before_end[-1]["zoom"], 1.0)  # still on the whole stage when the film ends
+
+    # CASE-B7.1
+    def test_narrated_seconds_are_never_cut(self):
+        act = activity_with([(1, 2, TOP_LEFT), (8, 9, TOP_LEFT)], seconds=10)
+        _, keep = motion.plan([Beat(0.5, 10, focus=[TOP_LEFT], protect=6.0)], act, 10)
+        for a, b in zip(keep, keep[1:]):
+            self.assertGreaterEqual(a[1], 6.5)  # nothing removed before 0.5 + 6.0
 
     def test_long_stillness_is_cut_short_stillness_kept(self):
         act = activity_with([(1, 2, TOP_LEFT), (8, 9, TOP_LEFT)], seconds=10)
@@ -122,3 +158,20 @@ class CameraPlan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PresenterCaptions(unittest.TestCase):
+    # CASE-B8.1
+    def test_speech_is_cut_into_short_lines(self):
+        from reel.narrate import CHUNK_WORDS, chunk_words
+        words, t = [], 0.0
+        for w in "This is the queue. It runs heavy builds one at a time and lends every agent its own device".split():
+            words.append((t, t + 0.25, " " + w))
+            t += 0.3
+        words.append((t + 1.5, t + 1.8, " Done."))  # after a long pause
+        lines = chunk_words(words)
+        self.assertEqual(lines[0]["text"], "This is the queue.")  # sentence end
+        self.assertTrue(all(len(l["text"].split()) <= CHUNK_WORDS for l in lines))
+        self.assertEqual(lines[-1]["text"], "Done.")  # the pause starts a new line
+        for a, b in zip(lines, lines[1:]):
+            self.assertLessEqual(a["end"], b["start"])  # never two lines at once

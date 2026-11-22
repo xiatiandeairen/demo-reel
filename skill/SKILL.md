@@ -1,32 +1,38 @@
 ---
 name: demo-reel
-description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器 App、网页或 Mac 窗口录一条 30 秒内、发 X 和放 GitHub README 用的演示时使用；写分镜、真实执行、自动推拉镜头和剪空等、加标题卡和标注、按平台导出并检查大小和敏感信息。用户说"录个 demo""做个 GIF""给 README 配个演示视频""重录演示"时用。
+description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器或真机上的 App、网页或 Mac 窗口录一条 30 秒内的主片和几段功能短片，发 X 和放 GitHub README 用；写分镜、真实执行、自动推拉镜头和剪空等、逐句旁白字幕，可选本地合成配音和真人出镜，按平台导出 mp4 和 GIF 并检查大小和敏感信息。用户说"录个 demo""做个 GIF""给 README 配个演示视频""重录演示"时用。
 ---
 
 # demo-reel
 
-把一份分镜文件（`reel.toml`）变成一条成片：真实执行每一步并记下时间，按画面变化推拉镜头、剪掉空等，加标题卡和标注，导出 X 用的 mp4、README 用的 GIF 和 mp4，最后检查。命令是本 skill 目录里的 `reel`（指向仓库的 `bin/reel`），下文直接写作 `reel`。
+把一份分镜文件（`reel.toml`）变成成片：真实执行每一步并记下时间，镜头推到正在变化的地方、剪掉空等，逐句旁白字幕，导出主片（X 用的 `x.mp4`、README 用的 `readme.gif` 和 `readme.mp4`）和功能短片（`clips/<名字>.mp4` 和 `.gif`），最后检查。成片风格对标 Tailwind、v0、Framer 在 X 上的发布视频：第一帧就是产品、鼠标显眼、推得够深、结尾回到全景。命令是本 skill 目录里的 `reel`（指向仓库的 `bin/reel`），下文直接写作 `reel`。
 
 ## 做法
 
 1. 写分镜：放在被演示项目里，通常是 `docs/demo/reel.toml`，演示要用的准备脚本、替身脚本放在它旁边，以后改了代码一句话就能重录。字段见仓库里 `reel/spec.py` 和各录制器文件开头（终端 `reel/record_terminal.py`，iOS `record_ios.py`，网页 `record_web.py`，Mac `record_mac.py`），写法参考 `examples/`；仓库根目录是 `reel` 这个软链所指文件的上两级。
-2. 出片：`reel make docs/demo/reel.toml`。产物都在 `docs/demo/.reel/out/`：`x.mp4`、`readme.gif`、`readme.mp4`、`check.json`。把 `docs/demo/.reel/` 加进项目的 `.gitignore`，只提交最后要用的 GIF 或 mp4。录的是 PATH 上的工具；要录当前检出的构建，在准备脚本里先编译，再把产物目录放到 PATH 前面。
+2. 出片：`reel make docs/demo/reel.toml`。产物都在 `docs/demo/.reel/out/`：`x.mp4`、`readme.gif`、`readme.mp4`、`clips/`、`check.json`。把 `docs/demo/.reel/` 加进项目的 `.gitignore`，只提交最后要用的 GIF 或 mp4。录的是 PATH 上的工具；要录当前检出的构建，在准备脚本里先编译，再把产物目录放到 PATH 前面。
 3. 看检查：`reel make` 最后打印检查结果，有 BAD 就修到全部 ok。泄露截图在 `out/leaks/`。
-4. 自己审片：`reel sheet docs/demo/.reel` 出一张覆盖全片的联系表（24 格，`out/sheet.png`），逐格看：首帧是不是标题卡、每个镜头框住的是不是正在变的地方、标注和画面是否对得上、有没有截断或错位。
-5. 交付：告诉用户每个文件的路径、时长、大小、检查结果和你审片看到的问题。发布、上传由用户做；帖子文案交给 x-post。
+4. 自己审片：`reel sheet docs/demo/.reel` 出一张覆盖全片的联系表（24 格，`out/sheet.png`），逐格看：首帧是不是产品画面、每个镜头框住的是不是正在变的地方、标注和画面是否对得上、有没有截断或错位。
+5. 真人出镜（用户要时）：请用户在自己的终端运行 `reel narrate docs/demo/.reel`，边看成片边讲；会生成 `out/x-presenter.mp4` 和 `readme-presenter.mp4`（右下角是用户的摄像头小窗，字幕来自他说的话）。这一步要用户本人在电脑前，终端第一次会要摄像头和麦克风权限。小窗会用 macOS 的人脸识别以脸为中心裁剪；脸贴着摄像头画面底边时没法居中，请用户坐正、让脸在摄像头画面中部。字幕按停顿和句末切成每条不超过 7 个词。人声会先用 RNNoise 降噪，再做低切、压缩、人声提亮、去齿音和响度统一（类似 Adobe Enhance Speech 的思路）；底噪仍然明显时，请用户离麦克风近一些或调高输入音量再录，降噪救不回太小的原始音量。
+6. 交付：告诉用户每个文件的路径、时长、大小、检查结果和你审片看到的问题。发布、上传由用户做；帖子文案交给 x-post。
 
 ## 分镜怎么写
 
-- 一条只讲一件事："问题 → 操作 → 结果"，3～8 步，成片 30 秒内（标题卡和结尾卡各约 1.8 秒）。
-- 每步一个 `caption`，6～8 个英文词，说这一步发生了什么、为什么值得看，不复述命令本身。
+- 一条只讲一件事："问题 → 操作 → 结果"，3～8 步，主片 30 秒内。第一帧就是产品画面；标题卡默认不加（`intro = true` 才加），结尾卡 `outro = true` 才加，标题和链接交给帖子文字。
+- 每步一句旁白 `say`：一句完整的英文短句，说这一步发生了什么、为什么值得看，不复述命令本身；它就是底部逐句出现的字幕。这一步靠按键完成时加 `keys = "space"` 或 `keys = ["cmd", "k"]`，句末显示按键徽标。
+- 开配音时旁白要短：每句 3～6 个词，8 步合计 15 秒左右；旁白按真实语速播放，30 秒的主片装不下长句。
+- 配音（可选）：加 `[voice]`，`voice = "am_michael"`（美式男声）或 `"bf_emma"`（英式女声），用本地 Kokoro 把每句 `say` 读出来；录制时每步至少停到这句话说完，说话的时段不会被剪掉。所以开了配音整体会变慢：靠时机才出现的画面（比如"排队中"）可能在说完之前就过去了，`wait` 会因此失败，这时把替身脚本的耗时加长，别删掉 `wait`。第一次用会在 `~/.cache/demo-reel/` 装环境、下模型，要十几分钟。产品名、缩写读不准时，加 `speak` 写给配音用的拼读（比如把 `kubectl` 写成 `cube control`），字幕仍显示 `say`；先合成一句听听再决定要不要加。
+- 一条片子讲一件事：步骤多、想法不止一个时，用 `[film] from/to` 只把前几步放进主片，后面的步骤用 `[[clip]]` 单独出短片，都来自同一次录制。
+- 功能短片：用 `[[clip]]` 标出 `name`、`from`、`to`（步骤编号，从 1 起），从同一次录制剪出 4～15 秒、首尾能循环的短片，适合 README 各功能小节或后续帖子。
 - 打字按每字 45 毫秒上屏（`[terminal] typing_ms` 可调），80 个字符的命令约 3.6 秒；命令尽量短，长路径先放进准备脚本或别名。
 - 结论要看得见：关键数字或结果单独打印一行（如 `build 5.1s → 1.5s`），不要埋在长行中间。
 - 被演示的工具真实运行，不伪造输出。耗时太长的依赖可以用替身脚本，在分镜开头注释里写明谁是替身。长等待不用自己剪，录制后会自动剪掉。
-- 终端演示在 `/tmp` 下的中性目录里跑（`[terminal] workdir`，每次录制前会被清空），画面里不出现家目录路径；准备脚本以 `bash setup.sh <workdir>` 调用。单窗格用 `font_size = 36`～`40`，否则缩到 README 宽度看不清；要多个窗格时用 `[[pane]]`，一直在刷新的看板标 `noisy = true`。
+- 终端演示在 `/tmp` 下的中性目录里跑（`[terminal] workdir`，每次录制前会被清空），画面里不出现家目录路径；准备脚本以 `bash setup.sh <workdir>` 调用。终端按 3840×2160 录制，默认字号 40；单窗格用 48～54，否则缩到 README 宽度看不清；要多个窗格时用 `[[pane]]`，一直在刷新的看板标 `noisy = true`。
 - 演示里有意让某条命令失败时，那一步写 `allow_fail = true`，否则非零退出会让录制失败。
 - 每个会等待的步骤写 `wait`（终端是整屏文字上的正则，网页和 iOS 是选择器，如 iOS 的 `text="Done"`、`value="36"`），等不到就失败，不会带着错误画面出片。终端的 `wait` 会匹配到屏幕上已有的旧输出：等第二次出现写成 `ok[\s\S]*ok`。
 - iOS 真机：`[ios] device = "physical"`，经 aq 借用户登记过的 iPhone；运行前在环境里设好 agent-device 的签名变量（项目或工作区说明里有就照用，不写进分镜）。手机要解锁、自动锁定设为永不、打开 Enable UI Automation，这些只能请用户做。真机的状态栏、通知、账号名会原样录进去，挑不含个人信息的 App 和页面。按钮名跟着手机语言走，先 `agent-device open <app>` 看快照里的名字再写分镜；即时响应的 App 加 `settle = false`，否则每步要等 3 秒左右。
-- 镜头：终端步骤默认对准打字的窗格；不写 `focus` 的看看步骤会跟着画面变化走。只在确定这一步只有那一处在变时才写死 `focus`，否则别处同时变化时镜头不会跟过去。单窗格里输出行很长时写 `focus = "full"`，避免推近后截断行。网页、Mac 跟着画面变化走；iOS 始终显示整台手机。
+- 节奏：开场先在全景停 1.5 秒再缓推进去，结尾拉回全景停稳后淡出（短片循环，不淡出）；第一步前的准备别太长，开场就有内容在动。
+- 镜头：终端步骤默认推到打字窗格里正在变化的那几行（最多 3 倍，左边对齐窗格），结尾自动拉回全景；不写 `focus` 的看看步骤会跟着画面变化走。只在确定这一步只有那一处在变时才写死 `focus`，否则别处同时变化时镜头不会跟过去。单窗格里输出行很长时写 `focus = "full"`，避免推近后截断行。网页跟着画面变化走，录制时页面里会画一个放大、平滑移动的光标，点击处有涟漪；Mac 和 iOS 始终显示整个窗口和整台手机。
 
 ## 出错时
 
@@ -36,8 +42,10 @@ description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器 App、
 | `sensitive text` 为 BAD | 看 `leaks/` 截图，改分镜或准备脚本让它不出现，再重录；不要只改检查规则 |
 | `readme.gif size` 为 BAD | 缩短演示或减少整屏变化；GIF 上限可用 `gif_max_mb` 调低，不能调高过 10 |
 | `no active display`（Mac） | 屏幕没亮或已锁定，请用户在场时再录 |
+| `clips/... loops` 为 BAD | 短片首尾差太多，通常是范围里最后一步还在大幅变化；把 `to` 改到画面稳定的那一步 |
+| `narration loudness` 为 BAD | 配音没混进去或太轻：看 `voice/` 里有没有每步的 wav |
 | 镜头切得早或晚 | 看 `reel sync <目录>` 的 delta；终端录制会用每条命令回车的时刻自动校正 |
 
 ## 依赖
 
-python3 ≥ 3.11、ffmpeg、Google Chrome；终端加 vhs、tmux、Homebrew bash；iOS 加 agent-device；网页加 agent-browser；模拟器和浏览器都通过 aq 借用。
+python3 ≥ 3.11、ffmpeg、Google Chrome；终端加 vhs、tmux、Homebrew bash；iOS 加 agent-device；网页加 agent-browser；模拟器和浏览器都通过 aq 借用。配音和真人出镜另需 uv（自动装 Kokoro 和 mlx-whisper 到 `~/.cache/demo-reel/tts-venv`），出镜还要 ffplay 和摄像头。

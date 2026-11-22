@@ -41,6 +41,7 @@ from . import stage
 from .record_terminal import RecordError, _slug
 
 ACTIONS = ("click", "fill", "type", "press", "hover", "scroll")
+CURSOR_JS = Path(__file__).resolve().parent / "assets" / "cursor.js"
 
 
 def _hold_browser() -> tuple:
@@ -85,9 +86,10 @@ def record(spec: dict, out: Path) -> Path:
     try:
         vw, vh = web.get("viewport", [1600, 900])
         ab("set", "viewport", vw, vh)
-        ab("open", web["url"])
+        # Our own large, gliding cursor with click ripples (Screen Studio-like), not agent-browser's small one.
+        ab("--init-script", CURSOR_JS, "open", web["url"])
         ab("wait", "1000")
-        ab("record", "start", raw, "--cursor")
+        ab("record", "start", raw)
         t0 = time.monotonic()
         time.sleep(1.2)  # the page as it is, before anything happens
         for i, s in enumerate(steps, 1):
@@ -103,8 +105,11 @@ def record(spec: dict, out: Path) -> Path:
                 r = ab("wait", s["wait"], check=False)
                 if r.returncode != 0:
                     raise RecordError(f"step {i}: waited for {s['wait']!r}: {(r.stderr or r.stdout).strip()}")
-            time.sleep(float(s.get("hold", 1.0)))
-            beats.append({"start": round(start, 3), "label": f"step {i}", "caption": s.get("caption")})
+            # Hold at least until the step's narration has been spoken (CASE-B7.1).
+            spoken = s.get("_narration", 0.0) + 0.3 - (time.monotonic() - t0 - start)
+            time.sleep(max(float(s.get("hold", 1.0)), spoken))
+            beats.append({"start": round(start, 3), "label": f"step {i}", "caption": s.get("caption"),
+                          "narration": s.get("_narration", 0.0)})
         r = ab("record", "stop", check=False)
         if r.returncode != 0:  # seen once: the first stop fails, a second one saves
             time.sleep(1.0)

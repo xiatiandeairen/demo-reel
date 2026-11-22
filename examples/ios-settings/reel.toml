@@ -9,15 +9,15 @@ app = "Settings"
 
 [[step]]
 press = 'text="General"'
-caption = "Open General"
+say = "Open General."
 hold = 1.2
 
 [[step]]
 press = 'text="About"'
-caption = "Then About"
+say = "Then About."
 hold = 1.5
 
 [[step]]
 back = true
-caption = "And back"
+say = "And back."
 hold = 1.2

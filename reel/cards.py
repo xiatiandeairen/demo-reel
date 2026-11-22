@@ -47,13 +47,55 @@ p{{font-size:{int(h * 0.036)}px;font-weight:500;opacity:.85;margin:{int(h * 0.02
     _shot(page, out, w, h)
 
 
-def caption(out: Path, text: str, w=1920, h=1080):
-    """A full-frame transparent PNG with a caption pill near the bottom."""
+def _keycaps(keys) -> str:
+    if not keys:
+        return ""
+    keys = [keys] if isinstance(keys, str) else list(keys)
+    caps = "".join(f'<kbd>{html.escape(k)}</kbd>' for k in keys)
+    return f'<span class="keys">{caps}</span>'
+
+
+def caption(out: Path, text: str, keys=None, w=1920, h=1080):
+    """A full-frame transparent PNG: one narration sentence near the bottom, with optional keycaps.
+
+    Sentences wrap to at most two lines; keys (e.g. "space" or ["cmd", "k"]) follow as keycaps,
+    like lazygit's "Stage a file  Pressing <space>".
+    """
+    fs = int(h * 0.034)
     page = f"""<!doctype html><meta charset="utf-8"><style>
 html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent}}
-div{{position:absolute;left:50%;bottom:{int(h * 0.06)}px;transform:translateX(-50%);
-max-width:{int(w * 0.8)}px;padding:{int(h * 0.014)}px {int(h * 0.026)}px;border-radius:{int(h * 0.03)}px;
-background:rgba(15,17,26,.82);color:#fff;font-family:{FONT};font-size:{int(h * 0.032)}px;font-weight:600;
-box-shadow:0 8px 30px rgba(0,0,0,.35);white-space:nowrap}}
-</style><div>{html.escape(text)}</div>"""
+.c{{position:absolute;left:50%;bottom:{int(h * 0.055)}px;transform:translateX(-50%);
+max-width:{int(w * 0.72)}px;width:max-content;padding:{int(h * 0.013)}px {int(h * 0.024)}px;
+border-radius:{int(h * 0.022)}px;background:rgba(12,13,18,.78);backdrop-filter:blur(8px);
+color:#fff;font-family:{FONT};font-size:{fs}px;font-weight:600;line-height:1.3;text-align:center;
+box-shadow:0 10px 34px rgba(0,0,0,.35);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
+.keys{{display:inline-flex;gap:{int(fs * 0.25)}px;margin-left:{int(fs * 0.45)}px;vertical-align:{int(fs * 0.08)}px}}
+kbd{{font-family:{FONT};font-size:{int(fs * 0.72)}px;font-weight:600;color:#0c0d12;background:linear-gradient(#fff,#d9dbe3);
+border-radius:{int(fs * 0.22)}px;padding:{int(fs * 0.06)}px {int(fs * 0.3)}px;box-shadow:0 {int(fs * 0.08)}px 0 #8b8f9c}}
+</style><div class="c">{html.escape(text)}{_keycaps(keys)}</div>"""
+    _shot(page, out, w, h)
+
+
+def backdrop(accent: list, w: int) -> tuple:
+    """(css, markup) for a wallpaper-like backdrop: soft colour fields in the accent colours over
+    a dark base, with fine grain. Shared by terminal backgrounds and the stage underlay."""
+    c0, c1 = accent[:2]
+    css = f"""body{{background:#0b0d14}}
+.bd{{position:absolute;inset:-20%;filter:blur({int(w * 0.04)}px);background:
+radial-gradient(40% 50% at 18% 22%, {c1} 0%, transparent 70%),
+radial-gradient(45% 55% at 85% 30%, {c0} 0%, transparent 72%),
+radial-gradient(55% 60% at 60% 95%, {c1}cc 0%, transparent 70%),
+radial-gradient(35% 40% at 30% 80%, {c0}aa 0%, transparent 70%);opacity:.95}}
+.grain{{position:absolute;inset:0;width:100%;height:100%;opacity:.10;mix-blend-mode:overlay}}"""
+    markup = ('<div class="bd"></div><svg class="grain" xmlns="http://www.w3.org/2000/svg"><filter id="n">'
+              '<feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/></filter>'
+              '<rect width="100%" height="100%" filter="url(#n)"/></svg>')
+    return css, markup
+
+
+def background(out: Path, accent: list, w: int, h: int):
+    css, markup = backdrop(accent, w)
+    page = f"""<!doctype html><meta charset="utf-8"><style>
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;position:relative}}
+{css}</style>{markup}"""
     _shot(page, out, w, h)

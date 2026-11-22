@@ -13,13 +13,18 @@ from dataclasses import dataclass, field
 SMALL_W, SMALL_H = 192, 108   # analysis resolution
 SAMPLE_FPS = 10
 DIFF_THRESHOLD = 24           # gray-level change that counts as "changed"
-MAX_ZOOM = 2.0                # stage is recorded at 1.5x the output, so 2x stays sharp enough
+MAX_ZOOM = 2.5                # terminal stage is 2x the output (3840 wide); 3x lost all context in review
 PAD = 0.05                    # breathing room around the framed area, as a share of its size
 FULL_SHARE = 0.55             # a target larger than this share of the stage is shown full
-LEAD = 0.8                    # the camera starts moving this long before a step starts
-MOVE = 0.7                    # and takes this long
-IDLE_MAX = 2.0                # stillness longer than this is cut
-IDLE_KEEP = 0.5               # seconds kept on each side of a cut
+LEAD = 0.9                    # the camera starts moving this long before a step starts
+MOVE = 0.9                    # and takes this long (0.7 felt rushed in review)
+OPEN_HOLD = 1.5               # the film opens on the whole stage at least this long
+OPEN_MOVE = 1.2               # and the first push in is slower than the rest
+CLOSE_MOVE = 1.2              # so is the pull back to the whole stage at the end
+IDLE_MAX = 1.2                # stillness longer than this is cut
+IDLE_KEEP = 0.35              # seconds kept on each side of a cut
+END_ON_FULL = 1.8             # seconds the film rests on the whole stage before it fades out
+TIGHT_MIN_WIDTH = 0.75        # share of a pane's width a tight framing keeps
 
 
 Rect = tuple  # (x0, y0, x1, y1) in stage pixels
@@ -33,6 +38,8 @@ class Beat:
     focus: list = field(default_factory=list)   # rects to frame; empty = find it from the picture
     quiet_ignore: list = field(default_factory=list)  # rects whose changes do not count as activity
     label: str = ""
+    tight: bool = False      # frame what changed inside the focus rects, not the whole rects
+    protect: float = 0.0     # seconds after start that must not be cut (narration is playing)
 
 
 class Activity:
@@ -90,8 +97,8 @@ class Activity:
         x0, y0, x1, y1 = self._small(rect)
         return sum(m[y * SMALL_W + x0:y * SMALL_W + x1].count(1) for y in range(y0, y1))
 
-    def bbox(self, t0: float, t1: float, ignore: list = ()) -> Rect | None:
-        """Stage-pixel box around everything that changed between t0 and t1."""
+    def bbox(self, t0: float, t1: float, ignore: list = (), within: Rect | None = None) -> Rect | None:
+        """Stage-pixel box around everything that changed between t0 and t1 (inside `within`)."""
         acc = bytearray(SMALL_W * SMALL_H)
         any_change = False
         for i in self._range(t0, t1):
@@ -101,8 +108,11 @@ class Activity:
                 acc = bytearray(a | b for a, b in zip(acc, m))
         if not any_change:
             return None
-        rows = [y for y in range(SMALL_H) if acc.find(1, y * SMALL_W, (y + 1) * SMALL_W) >= 0]
-        cols = [x for x in range(SMALL_W) if any(acc[y * SMALL_W + x] for y in rows)]
+        wx0, wy0, wx1, wy1 = self._small(within) if within else (0, 0, SMALL_W, SMALL_H)
+        rows = [y for y in range(wy0, wy1) if acc.find(1, y * SMALL_W + wx0, y * SMALL_W + wx1) >= 0]
+        cols = [x for x in range(wx0, wx1) if any(acc[y * SMALL_W + x] for y in rows)]
+        if not rows or not cols:
+            return None
         sx, sy = self.stage_w / SMALL_W, self.stage_h / SMALL_H
         return (min(cols) * sx, min(rows) * sy, (max(cols) + 1) * sx, (max(rows) + 1) * sy)
 
@@ -152,7 +162,8 @@ def _same(a: dict, b: dict) -> bool:
             and abs(a["x"] - b["x"]) < 40 and abs(a["y"] - b["y"]) < 40)
 
 
-def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM) -> tuple:
+def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM,
+         end_full_at: float | None = None) -> tuple:
     """Returns (shots, keep) for the timeline.
 
     Each beat gets one framing: its focus rects if given, otherwise the box around what changed
@@ -163,7 +174,11 @@ def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM
     full = {"x": W / 2, "y": H / 2, "zoom": 1.0}
     cams = []
     for b in beats:
-        if b.focus:
+        if b.focus and b.tight:
+            area = union(b.focus)
+            changed = act.bbox(b.start, b.end, b.quiet_ignore, within=area)
+            target = _tighten(changed, area) if changed else area
+        elif b.focus:
             target = union(b.focus)
         else:
             target = act.bbox(b.start, b.end, b.quiet_ignore)
@@ -172,16 +187,53 @@ def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM
     # Always open on the whole stage, so viewers see the layout before the camera moves in.
     shots = [{"t": 0.0, **full}]
     current = shots[0]
+    end_at = duration if end_full_at is None else end_full_at
+    pulled_back = False
+
+    def back_to_full():
+        nonlocal current
+        if _same(current, full):
+            return
+        # Always end on the whole stage; in a short film, shorten the rest and the move to fit.
+        t_move = max(end_at - END_ON_FULL - CLOSE_MOVE, shots[-1]["t"] + 0.3)
+        move = max(0.5, min(CLOSE_MOVE, end_at - 0.4 - t_move))
+        if t_move + move > end_at:
+            return
+        shots.append({"t": round(t_move, 3), **{k: current[k] for k in ("x", "y", "zoom")}})
+        shots.append({"t": round(t_move + move, 3), **full})
+        current = full
+
     for b, cam in zip(beats, cams):
+        if not pulled_back and b.start >= end_at - 0.01:
+            back_to_full()  # the main film ends here; later steps only feed clips
+            pulled_back = True
         if _same(cam, current):
             continue
-        t_move = max(b.start - LEAD, shots[-1]["t"] + 0.01, 0.6 if len(shots) == 1 else 0.0)
+        first = len(shots) == 1
+        t_move = max(b.start - LEAD, shots[-1]["t"] + 0.01, OPEN_HOLD if first else 0.0)
+        if pulled_back:
+            t_move = max(t_move, end_at)  # steps after the main film move only once it has ended
+        move = OPEN_MOVE if first else MOVE
         shots.append({"t": round(t_move, 3), **{k: current[k] for k in ("x", "y", "zoom")}})
-        shots.append({"t": round(t_move + MOVE, 3), **cam})
+        shots.append({"t": round(t_move + move, 3), **cam})
         current = cam
+
+    # End on the whole stage again, like the references: the last thing seen is the full picture.
+    if not pulled_back:
+        back_to_full()
 
     keep = _keep(beats, act, duration)
     return shots, keep
+
+
+def _tighten(changed: Rect, area: Rect) -> Rect:
+    """What changed, widened to the left edge of its pane (terminal text starts there) and given
+    some lines of context above and below, never outside the pane."""
+    pad = (area[3] - area[1]) * 0.12
+    # At least TIGHT_MIN_WIDTH of the pane stays in view: closer than that, review showed a lone
+    # prompt line in a sea of black.
+    return (area[0], max(area[1], changed[1] - pad),
+            max(changed[2], area[0] + (area[2] - area[0]) * TIGHT_MIN_WIDTH), min(area[3], changed[3] + pad))
 
 
 def _keep(beats: list, act: Activity, duration: float) -> list:
@@ -189,7 +241,7 @@ def _keep(beats: list, act: Activity, duration: float) -> list:
     cuts = []
     for b in beats:
         rect = union(b.focus) if b.focus else None
-        lo, hi = b.start + 0.2, b.end - LEAD - 0.1
+        lo, hi = b.start + max(0.2, b.protect), b.end - LEAD - 0.1
         if hi - lo <= IDLE_MAX:
             continue
         for a, z in act.idle_runs(lo, hi, rect, [r for r in b.quiet_ignore if rect is None or r not in b.focus]):

@@ -85,6 +85,29 @@ def _first_frame_spread(path: Path) -> float:
     return (sum((v - mean) ** 2 for v in raw) / len(raw)) ** 0.5
 
 
+CLIP_SECONDS = (4, 15)
+LOOP_GAP_MAX = 6.0  # mean gray-level difference (0-255) between a clip's first and last frame
+
+
+def _gray(path: Path, where: list) -> bytes:
+    return subprocess.run(["ffmpeg", "-loglevel", "error", *where, "-i", str(path), "-frames:v", "1", "-vf",
+                           "scale=96:54,format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
+
+
+def loop_gap(path: Path) -> float:
+    """How far a clip's last frame is from its first (CASE-B6.1): near 0 means it loops cleanly."""
+    a, b = _gray(path, []), _gray(path, ["-sseof", "-0.05"])
+    return sum(abs(x - y) for x, y in zip(a, b)) / max(len(a), 1)
+
+
+def loudness(path: Path) -> float | None:
+    """Integrated loudness in LUFS, or None without an audio track (CASE-B7.2)."""
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af", "ebur128=framelog=quiet",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    m = re.findall(r"I:\s+(-?[\d.]+) LUFS", r.stderr)
+    return float(m[-1]) if m and "Audio" in r.stderr else None
+
+
 def check(out: Path, spec: dict | None) -> dict:
     out = Path(out)
     d = out / "out"
@@ -104,10 +127,21 @@ def check(out: Path, spec: dict | None) -> dict:
     rm_size = (d / "readme.mp4").stat().st_size
     add("readme.mp4", rm["codec_name"] == "h264" and rm["pix_fmt"] == "yuv420p" and rm_size <= 10 * MB,
         f"{rm['width']}x{rm['height']} {rm_size / MB:.1f} MB (limit 10 MB)")
-    g = (d / "readme.gif").stat().st_size
-    tries = json.loads((d / "export.json").read_text())["gif_tries"]
-    add("readme.gif size", g <= gif_cap, f"{g / MB:.1f} MB (limit {gif_cap / MB:.0f} MB); tried "
-        + ", ".join(f"{t['width']}px/{t['fps']}fps/{t['colors']}c={t['bytes'] / MB:.1f}MB" for t in tries))
+    all_tries = json.loads((d / "export.json").read_text())["gif_tries"]
+    for name, tries in all_tries.items():
+        g = (d / name).stat().st_size
+        add(f"{name} size", g <= gif_cap, f"{g / MB:.1f} MB (limit {gif_cap / MB:.0f} MB); tried "
+            + ", ".join(f"{t['width']}px/{t['fps']}fps/{t['colors']}c={t['bytes'] / MB:.1f}MB" for t in tries))
+    for clip in sorted((d / "clips").glob("*.mp4")) if (d / "clips").exists() else []:
+        c = probe(clip)
+        add(f"clips/{clip.name} length", CLIP_SECONDS[0] <= c["duration"] <= CLIP_SECONDS[1],
+            f"{c['duration']:.1f} s (want {CLIP_SECONDS[0]}-{CLIP_SECONDS[1]} s)")
+        diff = loop_gap(clip)
+        add(f"clips/{clip.name} loops", diff <= LOOP_GAP_MAX, f"first vs last frame differ by {diff:.1f} (limit {LOOP_GAP_MAX})")
+    if spec.get("voice"):
+        lufs = loudness(d / "x.mp4")
+        add("narration loudness", lufs is not None and abs(lufs + 16) <= 2,
+            "no audio track" if lufs is None else f"{lufs:.1f} LUFS (target -16 ± 2)")
     spread = _first_frame_spread(d / "x.mp4")
     add("first frame", spread > 8, f"contrast {spread:.0f} (a blank frame is near 0)")
 

@@ -15,21 +15,23 @@ viewport = [1600, 900]
 [[step]]
 type = [".new-todo", "Record the demo"]
 press = "Enter"
-caption = "Add a todo"
+say = "Add a todo."
+keys = "enter"
 hold = 1.4
 
 [[step]]
 type = [".new-todo", "Check every frame"]
 press = "Enter"
-caption = "Add another"
+say = "And another one."
+keys = "enter"
 hold = 1.4
 
 [[step]]
 click = ".todo-list li:first-child .toggle"
-caption = "Tick one off"
+say = "Tick one off."
 hold = 1.0
 
 [[step]]
 click = "a[href='#/completed']"
-caption = "Filter to what is done"
+say = "Then show only what is done."
 hold = 1.5

@@ -55,7 +55,6 @@ def layout(kind: str, src_w: int, src_h: int) -> dict:
 def _underlay_html(lay: dict, accent: list, label: str) -> str:
     x, y, w, h = lay["hole"]
     r, b, bar = lay["radius"], lay["bezel"], lay["bar"]
-    c0, c1 = accent[:2]
     if lay["kind"] == "ios":
         frame = (f'<div class="f" style="left:{x - b}px;top:{y - b}px;width:{w + 2 * b}px;height:{h + 2 * b}px;'
                  f'border-radius:{r + b}px;background:#0c0d12;box-shadow:0 0 0 3px #3a3d48,0 40px 90px rgba(0,0,0,.45)"></div>')
@@ -67,15 +66,16 @@ def _underlay_html(lay: dict, accent: list, label: str) -> str:
     else:
         frame = (f'<div class="f" style="left:{x}px;top:{y}px;width:{w}px;height:{h}px;border-radius:{r}px;'
                  f'background:#000;box-shadow:0 40px 90px rgba(0,0,0,.45)"></div>')
+    bd_css, bd_markup = cards.backdrop(accent, W)
     return f"""<!doctype html><meta charset="utf-8"><style>
-html,body{{margin:0;width:{W}px;height:{H}px;overflow:hidden}}
-body{{background:linear-gradient(135deg,{c0},{c1});font-family:{cards.FONT}}}
+html,body{{margin:0;width:{W}px;height:{H}px;overflow:hidden;position:relative;font-family:{cards.FONT}}}
+{bd_css}
 .f{{position:absolute}}
 .dots{{position:absolute;left:28px;top:26px;display:flex;gap:16px}}
 .dots i{{display:block;width:22px;height:22px;border-radius:50%}}
 .url{{position:absolute;left:50%;top:14px;transform:translateX(-50%);min-width:40%;padding:10px 28px;
 border-radius:12px;background:#2c2e37;color:#c9ccd6;font-size:26px;text-align:center}}
-</style>{frame}"""
+</style>{bd_markup}{frame}"""
 
 
 def build(raw: Path, out: Path, kind: str, accent: list, label: str = "") -> dict:

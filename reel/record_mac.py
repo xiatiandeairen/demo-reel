@@ -114,8 +114,11 @@ def record(spec: dict, out: Path) -> Path:
                     _ref(mac["app"], s["wait"])
                 except RecordError:
                     raise RecordError(f"step {i}: {s['wait']!r} did not appear")
-            time.sleep(float(s.get("hold", 1.0)))
-            beats.append({"start": round(start, 3), "label": f"step {i}", "caption": s.get("caption")})
+            # Hold at least until the step's narration has been spoken (CASE-B7.1).
+            spoken = s.get("_narration", 0.0) + 0.3 - (time.monotonic() - t0 - start)
+            time.sleep(max(float(s.get("hold", 1.0)), spoken))
+            beats.append({"start": round(start, 3), "label": f"step {i}", "caption": s.get("caption"),
+                          "narration": s.get("_narration", 0.0)})
         used = time.monotonic() - t0
     finally:
         # screencapture stops at -V seconds; it ignores signals while recording.

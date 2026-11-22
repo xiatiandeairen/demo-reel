@@ -72,39 +72,78 @@ def plan(spec: dict, out: Path) -> Path:
     regions = ev.get("regions", {})
     rect = lambda name: tuple(regions[name]) if name in regions else None
     act = motion.Activity.from_video(str(out / st["path"]), st["width"], st["height"])
-    if ev.get("kind") == "terminal":
-        ev = refine(ev, act)
+    if ev.get("kind") == "terminal" and ev.get("sync", {}).get("method") != "marks":
+        ev = refine(ev, act)  # only without the on-screen marker: anchors are a rougher fallback
         (out / "events.refined.json").write_text(json.dumps(ev, indent=2, ensure_ascii=False) + "\n")
+    else:
+        (out / "events.refined.json").unlink(missing_ok=True)
 
     beats = []
     for b in ev["beats"]:
         beats.append(motion.Beat(
             start=b["start"], end=b["end"], label=b.get("label", ""),
             focus=[rect(n) for n in b.get("focus", []) if rect(n)] or list(map(tuple, b.get("focus_rects", []))),
-            quiet_ignore=[rect(n) for n in b.get("ignore", []) if rect(n)]))
+            quiet_ignore=[rect(n) for n in b.get("ignore", []) if rect(n)],
+            tight=ev.get("kind") == "terminal" and not b.get("full"),
+            protect=b.get("narration", 0.0)))
     # Pages and windows are framed from what changed, cursor included: keep more context there.
     # A portrait phone already fills the stage's height; zooming in would cut it off.
     # A Mac window is already scaled to fill the stage; zooming cut off its toolbar and edges.
     max_zoom = {"terminal": motion.MAX_ZOOM, "ios": 1.0, "mac": 1.0}.get(ev.get("kind"), 1.6)
-    shots, keep = motion.plan(beats, act, st["duration"], max_zoom)
+    # The main film can be a range of steps ([film] from/to); later steps then only feed clips.
+    film = spec.get("film")
+    film_window = None
+    if film:
+        a, z = int(film.get("from", 1)), int(film.get("to", len(ev["beats"])))
+        film_window = [0.0 if a == 1 else round(ev["beats"][a - 1]["start"] - 0.3, 3), round(ev["beats"][z - 1]["end"], 3)]
+    shots, keep = motion.plan(beats, act, st["duration"], max_zoom, end_full_at=film_window[1] if film_window else None)
 
+    # One narration sentence per step: `say`, else `caption`; `keys` adds keycaps after it.
     captions = []
-    for b in ev["beats"]:
-        if b.get("caption"):
-            captions.append({"start": round(min(b["start"] + 0.3, b["end"] - 0.1), 3),
-                             "end": round(b["end"], 3), "text": b["caption"]})
+    steps = spec.get("step", [])
+    for i, b in enumerate(ev["beats"]):
+        s = steps[i] if i < len(steps) else {}
+        text = s.get("say") or s.get("caption") or b.get("caption")
+        if text:
+            c = {"start": round(min(b["start"] + 0.2, b["end"] - 0.1), 3), "end": round(b["end"], 3), "text": text}
+            if s.get("keys"):
+                c["keys"] = s["keys"]
+            captions.append(c)
 
     data = {
         "stage": st,
         "output": {"width": 1920, "height": 1080, "fps": 30},
-        "style": {"accent": spec["accent"], "kind": ev["kind"]},
+        # Motion blur is opt-in: frame blending ghosts text on fast zooms (2026-11-22 review).
+        "style": {"accent": spec["accent"], "kind": ev["kind"], "motion_blur": bool(spec.get("motion_blur"))},
         "keep": keep,
         "shots": shots,
         "captions": captions,
-        "intro": {"seconds": INTRO_SECONDS, "title": spec["title"], "subtitle": spec.get("subtitle", "")},
     }
-    if spec.get("url"):
-        data["outro"] = {"seconds": OUTRO_SECONDS, "title": spec["title"], "subtitle": spec["url"]}
+    # Narration: each step's synthesised sentence, starting with its caption (see voice.py).
+    narration = []
+    for i, b in enumerate(ev["beats"], 1):
+        wav = out / "voice" / f"step{i:02d}.wav"
+        if spec.get("voice") and wav.exists():
+            narration.append({"wav": str(wav.relative_to(out)), "start": round(b["start"] + 0.2, 3)})
+    if narration:
+        data["narration"] = narration
+    if film_window:
+        data["film"] = film_window
+    # Feature clips: [[clip]] name, from, to (step numbers), cut from the same recording.
+    clips = []
+    for c in spec.get("clip", []):
+        a, z = int(c["from"]), int(c["to"])
+        if not (1 <= a <= z <= len(ev["beats"])):
+            raise ValueError(f"clip {c.get('name')!r}: steps {a}..{z} are outside 1..{len(ev['beats'])}")
+        clips.append({"name": c["name"], "start": round(max(0.0, ev["beats"][a - 1]["start"] - 0.3), 3),
+                      "end": round(ev["beats"][z - 1]["end"], 3)})
+    if clips:
+        data["clips"] = clips
+    # The references open on the product itself; title cards are opt-in.
+    if spec.get("intro"):
+        data["intro"] = {"seconds": INTRO_SECONDS, "title": spec["title"], "subtitle": spec.get("subtitle", "")}
+    if spec.get("outro"):
+        data["outro"] = {"seconds": OUTRO_SECONDS, "title": spec["title"], "subtitle": spec.get("url", "")}
     path = out / "timeline.json"
     timeline.save(data, path)
     return path

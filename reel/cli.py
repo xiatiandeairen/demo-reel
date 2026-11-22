@@ -8,6 +8,7 @@
     reel check <DIR>                      platform limits, first frame, sensitive text
     reel sync <DIR>                       logged step times vs visible changes, camera coverage
     reel sheet <DIR>                      contact sheet over the whole x.mp4, for review
+    reel narrate <DIR> [--camera 0] [--mic 0]   talk over the film: adds your camera, voice, captions
     reel test [--integration]             the case suite
 
 The default output directory is .reel/ next to reel.toml.
@@ -39,15 +40,44 @@ def _record(spec, out):
         from .record_mac import record
     out.mkdir(parents=True, exist_ok=True)
     (out / "spec.txt").write_text(spec["_path"] + "\n")
+    from .voice import prepare
+    prepare(spec, out)  # narration first: its length sets how long each step holds
     return record(spec, out)
+
+
+def _compose_all(out: Path) -> None:
+    """master.mp4 (with narration mixed in, if any) and clips/<name>.mp4 for each feature clip."""
+    from . import timeline as tlm
+    from .compose_ffmpeg import XFADE, add_narration, compose
+    tl_path = out / "timeline.json"
+    tl = tlm.load(tl_path)
+    master = out / "master.mp4"
+    window = tuple(tl["film"]) if tl.get("film") else None
+    keep = tl["keep"]
+    if window:
+        keep = [[max(a, window[0]), min(b, window[1])] for a, b in keep if min(b, window[1]) - max(a, window[0]) > 0.05]
+    narration = [n for n in tl.get("narration", []) if tlm.output_time(keep, n["start"]) is not None]
+    if narration:
+        silent = out / "master-silent.mp4"
+        compose(tl_path, silent, window=window, with_cards=True)
+        lead = tl["intro"]["seconds"] - XFADE if tl.get("intro") else 0.0
+        items = [(out / n["wav"], lead + tlm.output_time(keep, n["start"])) for n in narration]
+        add_narration(silent, items, master)
+    else:
+        compose(tl_path, master, window=window, with_cards=True)
+    print(f"composed {master}")
+    for c in tl.get("clips", []):
+        dst = out / "clips" / f"{c['name']}.mp4"
+        dst.parent.mkdir(exist_ok=True)
+        compose(tl_path, dst, window=(c["start"], c["end"]), loop=True)
+        print(f"composed {dst}")
 
 
 def _finish(out: Path, spec: dict | None, steps=("compose", "export", "check")) -> int:
     from .check import check, print_report
-    from .compose_ffmpeg import compose
     from .export import export
     if "compose" in steps:
-        print(f"composed {compose(out / 'timeline.json', out / 'master.mp4')}")
+        _compose_all(out)
     if "export" in steps:
         export(out, spec)
     if "check" in steps:
@@ -66,6 +96,10 @@ def main(argv=None):
         s.add_argument("--out")
     for name in ("compose", "export", "check", "sync", "sheet"):
         sub.add_parser(name).add_argument("dir")
+    s = sub.add_parser("narrate")
+    s.add_argument("dir")
+    s.add_argument("--camera", default="0")
+    s.add_argument("--mic", default="0")
     s = sub.add_parser("test")
     s.add_argument("--integration", action="store_true")
     a = p.parse_args(argv)
@@ -74,6 +108,10 @@ def main(argv=None):
     if a.cmd == "test":
         env_flag = ["env", "REEL_INTEGRATION=1"] if a.integration else []
         return subprocess.call([*env_flag, sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], cwd=ROOT)
+    if a.cmd == "narrate":
+        from .narrate import narrate
+        narrate(Path(a.dir), a.camera, a.mic)
+        return 0
     if a.cmd == "sheet":
         from .check import probe
         d = Path(a.dir) / "out"

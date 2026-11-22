@@ -13,6 +13,9 @@ Turn a short script into a polished product demo for X and your README: real com
 - **One script, every platform.** `x.mp4` for the X timeline (1920×1080 H.264), `readme.gif` and `readme.mp4` for GitHub, each under the platform's size limit.
 - **A camera that follows the action.** Each step's start time is logged while recording; the picture shows where things change. The camera eases to that area, and stillness longer than two seconds is cut.
 - **Checked before you see it.** Format, length and size limits, a legible first frame, and OCR over every half second for tokens, API keys, home-folder paths and your own private patterns.
+- **Made like the launches you scroll past.** It opens on the product, not a title card; the camera pushes in on the lines that change and pulls back at the end; web demos get a large gliding cursor with click ripples; moves carry a touch of motion blur.
+- **Narration that reads without sound.** One sentence per step appears as a caption, with keycaps for shortcuts. Optional: a local, natural-sounding voice reads it (Kokoro), or you talk over the film on camera (`reel narrate`).
+- **A film and its clips.** Mark steps as feature clips and get 4–15 s loops next to the main film, each as MP4 and GIF.
 - **Real, not staged.** Steps that wait for output fail the recording if it never shows, instead of producing a demo of a broken run.
 
 Supported subjects: terminal CLIs (VHS + tmux), iOS apps on a simulator or a real iPhone (agent-device), web pages (agent-browser) and Mac app windows (agent-desktop + screencapture).
@@ -64,6 +67,7 @@ caption = "Agent A starts a build"
 | `reel export <dir>` / `reel check <dir>` | Platform files in `<dir>/out`, then the checks |
 | `reel sheet <dir>` | A 24-frame contact sheet of the whole film, for review |
 | `reel sync <dir>` | Logged step times against visible changes |
+| `reel narrate <dir>` | Plays the film while recording your camera and voice; adds a picture-in-picture presenter and captions from what you said |
 
 Rendering is plain ffmpeg; title cards and captions are drawn by headless Chrome.
 

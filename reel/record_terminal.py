@@ -7,7 +7,7 @@ Spec fields for kind = "terminal":
     setup = "setup.sh"        # run once before recording as: bash setup.sh <workdir>
     teardown = "teardown.sh"  # run after recording, even if it failed: bash teardown.sh <workdir>
     init = "cd $REEL_WORK"    # run in every pane before recording (not shown)
-    font_size = 30            # 36-40 for one pane, so README-sized frames stay readable
+    font_size = 40            # 48-54 for one pane, so README-sized frames stay readable
     typing_ms = 45            # per character; long commands cost len x this on screen
     theme = "Catppuccin Mocha"
     prompt = "$ "
@@ -43,11 +43,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
-W, H = 2880, 1620
-MARGIN, PADDING, BAR = 80, 24, 60
+W, H = 3840, 2160  # 2x the output, so a 3x zoom is only a 1.5x upscale
+MARGIN, PADDING, BAR = 107, 32, 80
 FPS = 15
 TYPING_MS = 45
 SHOW_DELAY = 0.3   # tape: Sleep between the first mark and Show
+MARK_OFF, MARK_ON, MARK_GLYPH = 235, 238, "█"  # xterm greys #262626 / #444444: barely visible, easy to detect
+RETIME_FPS = 30
 
 
 class RecordError(RuntimeError):
@@ -72,13 +74,6 @@ def _vhs_string(s: str) -> str:
     if "`" not in s:
         return f"`{s}`"
     raise RecordError(f"cannot type text with both \" and `: {s!r}")
-
-
-def _gradient(path: Path, colors: list, w: int, h: int):
-    c0, c1 = (c.replace("#", "0x") for c in colors[:2])
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-                    f"gradients=s={w}x{h}:c0={c0}:c1={c1}:x0=0:y0=0:x1={w}:y1={h}:nb_colors=2",
-                    "-frames:v", "1", str(path)], check=True)
 
 
 def record(spec: dict, out: Path) -> Path:
@@ -114,7 +109,8 @@ def record(spec: dict, out: Path) -> Path:
     log = work / "events.log"
     log.write_text("")
 
-    _gradient(work / "bg.png", spec["accent"], W, H)
+    from . import cards
+    cards.background(work / "bg.png", spec["accent"], W, H)
 
     # Every pane's shell logs command start/end with the pane name and exit code.
     prompt = term.get("prompt", "$ ")
@@ -135,6 +131,10 @@ clear
     mark = work / "mark.sh"
     mark.write_text(f"""#!{bash}
 printf '%s mark - -\\n' "$EPOCHREALTIME" >> {shlex.quote(str(log))}
+n=$(grep -c ' mark ' {shlex.quote(str(log))})
+tmux -L {sock} set -g status-right "#[fg=colour$(( n % 2 ? {MARK_ON} : {MARK_OFF} ))]{MARK_GLYPH}"
+# tmux only redraws the status line on its own schedule; draw it now, or the flip shows up late.
+for c in $(tmux -L {sock} list-clients -F '#{{client_name}}'); do tmux -L {sock} refresh-client -S -t "$c"; done
 if [[ ! -f {shlex.quote(str(work / "geometry"))} ]]; then
   tmux -L {sock} display -p '#{{window_width}} #{{window_height}}' > {shlex.quote(str(work / "geometry"))}
   tmux -L {sock} list-panes -F '#{{pane_index}} #{{pane_left}} #{{pane_top}} #{{pane_width}} #{{pane_height}}' >> {shlex.quote(str(work / "geometry"))}
@@ -149,7 +149,12 @@ fi
     # Panes log their index (names may contain spaces); _events maps it back to the name.
     shell = lambda name: f"REEL_PANE={names.index(name)} {bash} --rcfile {shlex.quote(str(rc))} -i"
     tmux("new-session", "-d", "-s", "reel", "-x", "200", "-y", "50", shell(names[0]))
-    tmux("set", "-g", "status", "off", ";", "set", "-g", "mouse", "off", ";",
+    # The status line carries only the step marker (bottom right): a cell that flips between two dark
+    # greys at each step, so the video itself says when each step started (see _mark_times).
+    tmux("set", "-g", "status", "on", ";", "set", "-g", "status-style", "bg=default", ";",
+         "set", "-g", "status-left", "", ";", "set", "-g", "window-status-format", "", ";",
+         "set", "-g", "window-status-current-format", "", ";",
+         "set", "-g", "status-right", f"#[fg=colour{MARK_OFF}]{MARK_GLYPH}", ";", "set", "-g", "mouse", "off", ";",
          "set", "-g", "pane-active-border-style", "fg=colour39")
     if len(names) > 1:
         tmux("set", "-g", "pane-border-status", "top", ";", "set", "-g", "pane-border-format", " #{pane_title} ")
@@ -190,7 +195,7 @@ def _slug(s: str) -> str:
 
 
 def _tape(spec, term, names, work, sock) -> str:
-    font = term.get("font_size", 30)
+    font = term.get("font_size", 40)
     lines = [
         f'Output "{work}/stage.mp4"',
         "Require tmux",
@@ -224,7 +229,10 @@ def _tape(spec, term, names, work, sock) -> str:
         if s.get("wait"):
             rx = s["wait"].replace("/", "\\/")
             lines.append(f"Wait+Screen@{s.get('timeout', 30)}s /{rx}/")
-        lines.append(f"Sleep {s.get('hold', 1.0)}s")
+        # Hold at least until the step's narration has been spoken (CASE-B7.1); typing already took some.
+        typed = len(s.get("type", "")) * term.get("typing_ms", TYPING_MS) / 1000 + (0.4 if s.get("type") else 0)
+        hold = max(float(s.get("hold", 1.0)), s.get("_narration", 0.0) + 0.3 - typed)
+        lines.append(f"Sleep {hold:.2f}s")
     lines += ["Ctrl+B", 'Type "M"', "Hide", "Sleep 0.5s"]
     return "\n".join(lines) + "\n"
 
@@ -253,10 +261,25 @@ def _events(spec, panes, steps, work, out) -> Path:
         raise RecordError(f"expected {len(steps) + 2} step marks, got {len(marks)}")
     # mark 0 is SHOW_DELAY before the first frame; the last mark is right before the last frame.
     t0 = marks[0] + SHOW_DELAY
-    scale = duration / max(marks[-1] - t0, 1e-3)
-    vt = lambda wall: round(max(0.0, (wall - t0) * scale), 3)
-
     regions = _regions(panes, work)
+    # VHS drops frames when it cannot capture in time (about 20% at 4K, unevenly: worst while the
+    # machine is busy), so the video runs faster than reality. The marker cell tells when each step
+    # mark shows up in the video; the video is stretched back to wall-clock time piece by piece, so
+    # typing looks real and narration, which plays in real time, fits its step.
+    flips = _mark_times(final, regions["_marker"])
+    # The first mark is set while the recording is hidden, so its flip (if seen) lands on the first
+    # frames, not at its time; pair the step marks (and the end mark, if seen) from their flips.
+    if len(flips) == len(marks):
+        flips = flips[1:]
+    pairs = [(v, w - t0) for v, w in zip(flips, marks[1:])]
+    method = "marks" if len(flips) >= len(steps) else "uniform"
+    if method == "uniform":
+        scale = duration / max(marks[-1] - t0, 1e-3)
+        pairs = [(0.0, 0.0), (duration, duration / scale)]
+    dropped = round(1 - duration / max(marks[-1] - t0, 1e-3), 3)
+    _retime(final, pairs, duration, work)
+    duration = _probe_duration(final)
+    vt = lambda wall: round(min(max(0.0, wall - t0), duration), 3)
     cmds, open_ = [], {}
     names = [p["name"] for p in panes]
     for r in rows:
@@ -283,7 +306,8 @@ def _events(spec, panes, steps, work, out) -> Path:
         beats.append({"start": start, "end": round(end, 3), "label": f"step {i + 1}",
                       "focus": focus or [], "ignore": [n for n in noisy if n not in (focus or [])],
                       "caption": s.get("caption"), "pane": s.get("pane", panes[0]["name"]),
-                      "typed": bool(s.get("type")), "allow_fail": bool(s.get("allow_fail"))})
+                      "typed": bool(s.get("type")), "allow_fail": bool(s.get("allow_fail")),
+                      "full": focus == [] or focus == ["full"], "narration": s.get("_narration", 0.0)})
 
     # A typed command that exits non-zero fails the recording (unless the step allows it).
     for i, b in enumerate(beats, 1):
@@ -300,7 +324,7 @@ def _events(spec, panes, steps, work, out) -> Path:
         "regions": regions,
         "beats": beats,
         "commands": cmds,
-        "sync": {"marks": len(marks), "scale": round(scale, 4)},
+        "sync": {"marks": len(marks), "method": method, "marks_seen": len(flips), "frames_dropped": dropped},
     }
     path = out / "events.json"
     path.write_text(json.dumps(events, indent=2, ensure_ascii=False) + "\n")
@@ -312,8 +336,10 @@ def _regions(panes, work) -> dict:
     cols, rows = (int(v) for v in lines[0].split())
     x0, y0 = MARGIN + PADDING, MARGIN + BAR + PADDING
     cw = (W - 2 * (MARGIN + PADDING)) / cols
-    ch = (H - y0 - MARGIN - PADDING) / rows
-    regions = {"full": [0, 0, W, H]}
+    ch = (H - y0 - MARGIN - PADDING) / (rows + 1)  # + the status line
+    regions = {"full": [0, 0, W, H],
+               "_marker": [round(x0 + (cols - 1) * cw, 1), round(y0 + rows * ch, 1),
+                           round(x0 + cols * cw, 1), round(y0 + (rows + 1) * ch, 1)]}
     titled = len(panes) > 1
     for line, p in zip(sorted((l for l in lines[1:] if l.strip()), key=lambda l: int(l.split()[0])), panes):
         _, left, top, width, height = (int(v) for v in line.split())
@@ -321,3 +347,51 @@ def _regions(panes, work) -> dict:
         regions[p["name"]] = [round(x0 + left * cw, 1), round(top_px, 1),
                               round(x0 + (left + width) * cw, 1), round(y0 + (top + height) * ch, 1)]
     return regions
+
+
+def _mark_times(video: Path, cell) -> list:
+    """Video times at which the marker cell flips (one flip per step mark)."""
+    x0, y0, x1, y1 = (int(v) for v in cell)
+    w, h = max(2, x1 - x0 - 4), max(2, y1 - y0 - 4)
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(video), "-vf",
+                          f"crop={w}:{h}:{x0 + 2}:{y0 + 2},scale=1:1:flags=area,format=gray", "-f", "rawvideo", "-"],
+                         capture_output=True, check=True).stdout
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+                        "-of", "csv=p=0", str(video)], capture_output=True, text=True, check=True)
+    num, den = (int(v) for v in r.stdout.strip().split("/"))
+    fps = num / den
+    if not raw:
+        return []
+    lo, hi = min(raw), max(raw)
+    if hi - lo < 8:  # never flipped (or not visible)
+        return []
+    mid = (lo + hi) / 2
+    state = raw[0] > mid
+    flips = []
+    for i, v in enumerate(raw):
+        if (v > mid) != state:
+            state = v > mid
+            flips.append(round(i / fps, 3))
+    return flips
+
+
+def _retime(video: Path, pairs: list, duration: float, work: Path) -> None:
+    """Stretches video so that video time pairs[k][0] lands on wall time pairs[k][1] (piecewise linear)."""
+    pts = sorted(pairs)
+    if len(pts) < 2:
+        return
+    def seg(a, b):
+        (v0, w0), (v1, w1) = a, b
+        k = (w1 - w0) / max(v1 - v0, 1e-3)
+        return f"({w0:.4f}+(T-{v0:.4f})*{k:.5f})"
+    expr = seg(pts[-2], pts[-1])  # beyond the last pair: keep the last slope
+    for a, b in reversed(list(zip(pts, pts[1:]))[:-1]):
+        expr = f"if(lt(T,{b[0]:.4f}),{seg(a, b)},{expr})"
+    first = pts[0]
+    k0 = (pts[1][1] - pts[0][1]) / max(pts[1][0] - pts[0][0], 1e-3)
+    expr = f"if(lt(T,{first[0]:.4f}),max(0,{first[1]:.4f}+(T-{first[0]:.4f})*{k0:.5f}),{expr})"
+    retimed = work / "stage-retimed.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(video), "-vf",
+                    f"setpts='({expr})/TB',fps={RETIME_FPS}", "-c:v", "libx264", "-crf", "16",
+                    "-preset", "medium", "-pix_fmt", "yuv420p", str(retimed)], check=True)
+    shutil.move(str(retimed), video)

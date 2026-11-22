@@ -43,18 +43,37 @@ def gif(src: Path, dst: Path, max_bytes: int) -> list:
     return tries
 
 
+def _has_audio(path: Path) -> bool:
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                        "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    return bool(r.stdout.strip())
+
+
+def _video(src: Path, dst: Path, width: int | None, crf: int):
+    audio = ["-c:a", "aac", "-b:a", "160k"] if _has_audio(src) else ["-an"]
+    scale = ["-vf", f"scale={width}:-2:flags=lanczos"] if width else []
+    _ff("-i", str(src), *scale, "-c:v", "libx264", "-preset", "slow", "-crf", str(crf), "-pix_fmt", "yuv420p",
+        "-profile:v", "high", "-movflags", "+faststart", *audio, str(dst))
+
+
 def export(out: Path, spec: dict | None) -> Path:
+    """out/x.mp4, readme.mp4, readme.gif for the main film; out/clips/<name>.mp4 and .gif for
+    each feature clip. Narration, if any, stays on the mp4s; GIFs are silent by nature."""
     out = Path(out)
     master = out / "master.mp4"
     dst = out / "out"
     dst.mkdir(exist_ok=True)
     gif_cap = int(float((spec or {}).get("gif_max_mb", 10)) * MB)
-    _ff("-i", str(master), "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-profile:v", "high", "-movflags", "+faststart", "-an", str(dst / "x.mp4"))
-    _ff("-i", str(master), "-vf", "scale=1280:-2:flags=lanczos", "-c:v", "libx264", "-preset", "slow",
-        "-crf", "26", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(dst / "readme.mp4"))
-    tries = gif(master, dst / "readme.gif", gif_cap)
+    _video(master, dst / "x.mp4", None, 20)
+    _video(master, dst / "readme.mp4", 1280, 26)
+    tries = {"readme.gif": gif(master, dst / "readme.gif", gif_cap)}
+    clips_src = sorted((out / "clips").glob("*.mp4")) if (out / "clips").exists() else []
+    if clips_src:
+        (dst / "clips").mkdir(exist_ok=True)
+    for src in clips_src:
+        _video(src, dst / "clips" / src.name, 1280, 24)
+        tries[f"clips/{src.stem}.gif"] = gif(src, dst / "clips" / f"{src.stem}.gif", gif_cap)
     (dst / "export.json").write_text(json.dumps({"gif_cap_bytes": gif_cap, "gif_tries": tries}, indent=2) + "\n")
-    print(f"exported {dst}: " + ", ".join(f"{p.name} {p.stat().st_size / MB:.1f} MB"
-                                          for p in sorted(dst.glob('*.*')) if p.suffix != '.json'))
+    files = sorted(p for p in dst.rglob("*") if p.suffix in (".mp4", ".gif"))
+    print(f"exported {dst}: " + ", ".join(f"{p.relative_to(dst)} {p.stat().st_size / MB:.1f} MB" for p in files))
     return dst
