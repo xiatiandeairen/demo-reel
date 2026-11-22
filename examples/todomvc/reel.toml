@@ -1,0 +1,35 @@
+# Stand-in web demo (case A7): TodoMVC's vanilla JS app, served locally.
+title = "TodoMVC"
+subtitle = "Helping you select an MV* framework"
+url = "todomvc.com"
+kind = "web"
+accent = ["#7a1f3d", "#c0392b"]
+
+[web]
+setup = "setup.sh"
+serve = "python3 -m http.server 8765 --bind 127.0.0.1 --directory todomvc/examples/javascript-es6/dist"
+url = "http://127.0.0.1:8765/"
+label = "todomvc.com"
+viewport = [1600, 900]
+
+[[step]]
+type = [".new-todo", "Record the demo"]
+press = "Enter"
+caption = "Add a todo"
+hold = 1.4
+
+[[step]]
+type = [".new-todo", "Check every frame"]
+press = "Enter"
+caption = "Add another"
+hold = 1.4
+
+[[step]]
+click = ".todo-list li:first-child .toggle"
+caption = "Tick one off"
+hold = 1.0
+
+[[step]]
+click = "a[href='#/completed']"
+caption = "Filter to what is done"
+hold = 1.5

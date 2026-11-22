@@ -1,0 +1,4 @@
+#!/bin/bash
+# Runs the reel CLI from this checkout, also when called through a symlink (skill/reel): bin/reel --help
+root=$(python3 -c 'import os, sys; print(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1]))))' "$0")
+PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m reel.cli "$@"
