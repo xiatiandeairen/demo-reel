@@ -19,7 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import cards, timeline, voice
+from . import cards, paths, timeline, voice
 from .compose_ffmpeg import compose
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
@@ -160,8 +160,7 @@ RNNOISE_URL = ("https://raw.githubusercontent.com/GregorR/rnnoise-models/master/
 
 def _rnnoise_model() -> Path | None:
     """GregorR's public RNNoise model (~290 KB) for ffmpeg's arnndn, fetched once into the cache."""
-    import os
-    m = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "demo-reel" / "rnnoise" / "sh.rnnn"
+    m = paths.cache_root() / "rnnoise" / "sh.rnnn"
     if not m.exists():
         m.parent.mkdir(parents=True, exist_ok=True)
         r = subprocess.run(["curl", "-sfL", "--max-time", "60", "-o", str(m), RNNOISE_URL])
@@ -236,8 +235,10 @@ def narrate(out: Path, camera: str = "0", mic: str = "0") -> list:
     hint = " ".join([tl.get("intro", {}).get("title", "")] + [c["text"] for c in tl.get("captions", [])]).strip()
     segs = _transcribe(wav, audio_offset, hint)
     (out / "presenter-captions.json").write_text(json.dumps(segs, indent=2, ensure_ascii=False) + "\n")
-    x = _compose(film, raw, offset, segs, out / "out" / "x-presenter.mp4", audio=wav, audio_offset=audio_offset)
-    readme = out / "out" / "readme-presenter.mp4"
+    dst = paths.deliverables(out)
+    dst.mkdir(parents=True, exist_ok=True)
+    x = _compose(film, raw, offset, segs, dst / "x-presenter.mp4", audio=wav, audio_offset=audio_offset)
+    readme = dst / "readme-presenter.mp4"
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(x), "-vf", "scale=1280:-2:flags=lanczos",
                     "-c:v", "libx264", "-crf", "26", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart",
                     str(readme)], check=True)

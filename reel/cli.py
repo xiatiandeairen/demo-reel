@@ -11,7 +11,8 @@
     reel narrate <DIR> [--camera 0] [--mic 0]   talk over the film: adds your camera, voice, captions
     reel test [--integration]             the case suite
 
-The default output directory is .reel/ next to reel.toml.
+Nothing is written next to reel.toml: state goes to $XDG_STATE_HOME/demo-reel/<reel>/, deliverables to
+$XDG_DATA_HOME/demo-reel/<reel>/ (see reel/paths.py). <DIR> may be either that state directory or reel.toml.
 """
 from __future__ import annotations
 
@@ -24,8 +25,22 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _out(spec_path: str, out: str | None) -> Path:
-    return Path(out) if out else Path(spec_path).resolve().parent / ".reel"
+def _out(spec: dict, out: str | None) -> Path:
+    from . import paths
+    return Path(out) if out else paths.state_dir(spec)
+
+
+def paths_state(spec: dict) -> Path:
+    from . import paths
+    return paths.state_dir(spec)
+
+
+def _resolve(arg: str) -> Path:
+    """A reel's state directory, given that directory or its reel.toml."""
+    if arg.endswith(".toml"):
+        from . import paths, spec as spec_mod
+        return paths.state_dir(spec_mod.load(arg))
+    return Path(arg)
 
 
 def _record(spec, out):
@@ -36,6 +51,10 @@ def _record(spec, out):
         from .record_ios import record
     elif kind == "web":
         from .record_web import record
+    elif kind == "animation":
+        from .record_animation import record
+    elif kind == "card":
+        from .record_card import record
     else:
         from .record_mac import record
     out.mkdir(parents=True, exist_ok=True)
@@ -46,25 +65,29 @@ def _record(spec, out):
 
 
 def _compose_all(out: Path) -> None:
-    """master.mp4 (with narration mixed in, if any) and clips/<name>.mp4 for each feature clip."""
+    """scene.mp4 (silent, no fade: what a film joins) and narration.json; master.mp4 (faded out, with
+    narration mixed in, if any); clips/<name>.mp4 for each feature clip."""
     from . import timeline as tlm
-    from .compose_ffmpeg import XFADE, add_narration, compose
+    from .compose_ffmpeg import XFADE, add_narration, compose, fade_end
     tl_path = out / "timeline.json"
     tl = tlm.load(tl_path)
-    master = out / "master.mp4"
     window = tuple(tl["film"]) if tl.get("film") else None
     keep = tl["keep"]
     if window:
         keep = [[max(a, window[0]), min(b, window[1])] for a, b in keep if min(b, window[1]) - max(a, window[0]) > 0.05]
     narration = [n for n in tl.get("narration", []) if tlm.output_time(keep, n["start"]) is not None]
-    if narration:
+    lead = tl["intro"]["seconds"] - XFADE if tl.get("intro") else 0.0
+    items = [{"wav": n["wav"], "at": round(lead + tlm.output_time(keep, n["start"]), 3)} for n in narration]
+    scene = out / "scene.mp4"
+    compose(tl_path, scene, window=window, with_cards=True, fade_out=False)
+    (out / "narration.json").write_text(json.dumps(items, indent=2) + "\n")
+    master = out / "master.mp4"
+    if items:
         silent = out / "master-silent.mp4"
-        compose(tl_path, silent, window=window, with_cards=True)
-        lead = tl["intro"]["seconds"] - XFADE if tl.get("intro") else 0.0
-        items = [(out / n["wav"], lead + tlm.output_time(keep, n["start"])) for n in narration]
-        add_narration(silent, items, master)
+        fade_end(scene, silent)
+        add_narration(silent, [(out / n["wav"], n["at"]) for n in items], master)
     else:
-        compose(tl_path, master, window=window, with_cards=True)
+        fade_end(scene, master)
     print(f"composed {master}")
     for c in tl.get("clips", []):
         dst = out / "clips" / f"{c['name']}.mp4"
@@ -73,10 +96,28 @@ def _compose_all(out: Path) -> None:
         print(f"composed {dst}")
 
 
+def _make_scene(spec: dict, out: Path) -> None:
+    """Records, plans and composes one ordinary spec (a scene, or a film of its own)."""
+    from .planner import plan
+    _record(spec, out)
+    print(f"recorded {out / 'stage.mp4'}")
+    print(f"planned {plan(spec, out)}")
+    _compose_all(out)
+
+
 def _finish(out: Path, spec: dict | None, steps=("compose", "export", "check")) -> int:
     from .check import check, print_report
     from .export import export
-    if "compose" in steps:
+    if spec and spec["kind"] == "film":
+        (out / "spec.txt").parent.mkdir(parents=True, exist_ok=True)
+        (out / "spec.txt").write_text(spec["_path"] + "\n")
+        if "compose" in steps:
+            from .film import stitch
+            narrated = stitch(spec, out, _make_scene)
+            spec = {**spec, "voice": spec.get("voice") or narrated}
+        elif "check" in steps and (out / "film.json").exists():
+            spec = {**spec, "voice": spec.get("voice") or json.loads((out / "film.json").read_text()).get("narrated")}
+    elif "compose" in steps:
         _compose_all(out)
     if "export" in steps:
         export(out, spec)
@@ -110,11 +151,12 @@ def main(argv=None):
         return subprocess.call([*env_flag, sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], cwd=ROOT)
     if a.cmd == "narrate":
         from .narrate import narrate
-        narrate(Path(a.dir), a.camera, a.mic)
+        narrate(_resolve(a.dir), a.camera, a.mic)
         return 0
     if a.cmd == "sheet":
         from .check import probe
-        d = Path(a.dir) / "out"
+        from . import paths
+        d = paths.deliverables(_resolve(a.dir))
         dur = probe(d / "x.mp4")["duration"]
         sheet = d / "sheet.png"
         # 24 cells spread over the whole film, so the ending is reviewed too.
@@ -125,12 +167,19 @@ def main(argv=None):
         return 0
     if a.cmd == "sync":
         from .planner import framing_report, sync_report
-        print(json.dumps({"sync": sync_report(Path(a.dir)), "framing": framing_report(Path(a.dir))},
+        print(json.dumps({"sync": sync_report(_resolve(a.dir)), "framing": framing_report(_resolve(a.dir))},
                          indent=2, ensure_ascii=False))
         return 0
     if a.cmd in ("make", "record", "plan"):
         spec = spec_mod.load(a.spec)
-        out = _out(a.spec, a.out)
+        out = _out(spec, a.out)
+        if spec["kind"] == "film":
+            if a.cmd != "make":
+                print("a film has no recording of its own: reel make <film.toml>, or record a scene's own spec")
+                return 2
+            from .film import make_all
+            make_all(spec["_scenes"], lambda p: _make_scene(sc := spec_mod.load(p), paths_state(sc)))
+            return _finish(out, spec)
         if a.cmd in ("make", "record"):
             _record(spec, out)
             print(f"recorded {out / 'stage.mp4'}")
@@ -138,9 +187,12 @@ def main(argv=None):
             from .planner import plan
             print(f"planned {plan(spec, out)}")
         return _finish(out, spec) if a.cmd == "make" else 0
-    out = Path(a.dir)
+    out = _resolve(a.dir)
     spec_file = out / "spec.txt"
-    spec = spec_mod.load(spec_file.read_text().strip()) if spec_file.exists() else None
+    if a.dir.endswith(".toml"):
+        spec = spec_mod.load(a.dir)
+    else:
+        spec = spec_mod.load(spec_file.read_text().strip()) if spec_file.exists() else None
     return _finish(out, spec, steps=(a.cmd,))
 
 

@@ -96,7 +96,13 @@ def plan(spec: dict, out: Path) -> Path:
     if film:
         a, z = int(film.get("from", 1)), int(film.get("to", len(ev["beats"])))
         film_window = [0.0 if a == 1 else round(ev["beats"][a - 1]["start"] - 0.3, 3), round(ev["beats"][z - 1]["end"], 3)]
-    shots, keep = motion.plan(beats, act, st["duration"], max_zoom, end_full_at=film_window[1] if film_window else None)
+    if ev.get("kind") in ("animation", "card"):
+        # Drawn full-frame and timed by their author: no camera moves, nothing cut.
+        shots = [{"t": 0.0, "x": st["width"] / 2, "y": st["height"] / 2, "zoom": 1.0}]
+        keep = [[0.0, st["duration"]]]
+    else:
+        shots, keep = motion.plan(beats, act, st["duration"], max_zoom,
+                                  end_full_at=film_window[1] if film_window else None)
 
     # One narration sentence per step: `say`, else `caption`; `keys` adds keycaps after it.
     captions = []

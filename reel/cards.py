@@ -99,3 +99,43 @@ def background(out: Path, accent: list, w: int, h: int):
 html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;position:relative}}
 {css}</style>{markup}"""
     _shot(page, out, w, h)
+
+
+def stat_card(out: Path, lines: list, accent: list, w=1920, h=1080):
+    """A results card: one large line per figure over the backdrop, e.g. "Builds run: 3 → 1"."""
+    css, markup = backdrop(accent, w)
+    rows = "".join(f"<p>{html.escape(t)}</p>" for t in lines)
+    page = f"""<!doctype html><meta charset="utf-8"><style>
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;position:relative}}
+{css}
+.s{{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+font-family:{FONT};color:#fff;font-variant-numeric:tabular-nums}}
+.s p{{font-size:{int(h * 0.075)}px;font-weight:700;letter-spacing:-0.01em;margin:{int(h * 0.018)}px 0;
+text-shadow:0 6px 30px rgba(0,0,0,.35)}}
+</style>{markup}<div class="s">{rows}</div>"""
+    _shot(page, out, w, h)
+
+
+def device_frames(out: Path, labels: list, rects: list, w: int, h: int):
+    """A transparent stage-sized PNG: a phone body around each screen rect, a dark screen until the
+    device's recording starts, and its label underneath."""
+    parts = []
+    for label, (x0, y0, x1, y1) in zip(labels, rects):
+        sw, sh = x1 - x0, y1 - y0
+        b = round(sw * 0.035)
+        parts.append(f'<div class="ph" style="left:{x0 - b}px;top:{y0 - b}px;width:{sw}px;height:{sh}px;'
+                     f'border-width:{b}px;border-radius:{round(sw * 0.12) + b}px"></div>'
+                     f'<div class="lb" style="left:{x0}px;top:{y1 + b + 24}px;width:{sw}px">{html.escape(label)}</div>')
+    page = f"""<!doctype html><meta charset="utf-8"><style>
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent;position:relative}}
+.ph{{position:absolute;border-style:solid;border-color:#2a2e3a;background:#1a1d27;box-shadow:0 30px 90px rgba(0,0,0,.45)}}
+.lb{{position:absolute;text-align:center;font-family:{FONT};font-size:{int(h * 0.026)}px;font-weight:600;color:#e8eaf2}}
+</style>{"".join(parts)}"""
+    _shot(page, out, w, h)
+
+
+def rounded_mask(out: Path, w: int, h: int, r: int):
+    """White rounded rectangle on black: the alpha mask that rounds a phone screen's corners."""
+    page = f"""<!doctype html><style>html,body{{margin:0;width:{w}px;height:{h}px;background:#000;overflow:hidden}}
+div{{width:{w}px;height:{h}px;border-radius:{r}px;background:#fff}}</style><div></div>"""
+    _shot(page, out, w, h)

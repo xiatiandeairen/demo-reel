@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import getpass
 import json
-import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
+
+from . import paths
 
 MB = 1024 * 1024
 OCR_EVERY = 0.5
@@ -33,7 +34,7 @@ def patterns(spec: dict | None) -> list:
     user = getpass.getuser()
     if len(user) >= 3:
         pats.append(("user name", rf"\b{re.escape(user)}\b"))
-    private = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "demo-reel" / "private.txt"
+    private = paths.config_root() / "private.txt"
     if private.exists():
         for line in private.read_text().splitlines():
             if line.strip() and not line.startswith("#"):
@@ -55,7 +56,7 @@ def find_sensitive(lines: list, pats: list) -> list:
 
 
 def _ocr_bin() -> Path:
-    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "demo-reel"
+    cache = paths.cache_root()
     exe = cache / "ocr"
     src = Path(__file__).resolve().parent.parent / "tools" / "ocr.swift"
     if not exe.exists() or exe.stat().st_mtime < src.stat().st_mtime:
@@ -110,7 +111,7 @@ def loudness(path: Path) -> float | None:
 
 def check(out: Path, spec: dict | None) -> dict:
     out = Path(out)
-    d = out / "out"
+    d = paths.deliverables(out)
     spec = spec or {}
     max_s = float(spec.get("max_seconds", 30))
     gif_cap = float(spec.get("gif_max_mb", 10)) * MB

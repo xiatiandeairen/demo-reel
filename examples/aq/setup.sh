@@ -22,4 +22,5 @@ git init -q && git add -A && git -c core.hooksPath=/dev/null -c user.name=demo -
 source "$demo/env"
 aq run --wait 60 -- ./build.sh >/dev/null
 aq run --wait 60 -- ./test.sh >/dev/null
+: > "$demo/runs.log"  # the measuring runs above are not part of the demo
 echo "demo ready: source $demo/env && cd $demo/app"

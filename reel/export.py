@@ -14,6 +14,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from . import paths
+
 GIF_LADDER = [  # (width, fps, colors)
     (1120, 15, 128),
     (960, 12, 128),
@@ -61,8 +63,8 @@ def export(out: Path, spec: dict | None) -> Path:
     each feature clip. Narration, if any, stays on the mp4s; GIFs are silent by nature."""
     out = Path(out)
     master = out / "master.mp4"
-    dst = out / "out"
-    dst.mkdir(exist_ok=True)
+    dst = paths.deliverables(out)
+    dst.mkdir(parents=True, exist_ok=True)
     gif_cap = int(float((spec or {}).get("gif_max_mb", 10)) * MB)
     _video(master, dst / "x.mp4", None, 20)
     _video(master, dst / "readme.mp4", 1280, 26)

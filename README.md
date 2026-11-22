@@ -16,6 +16,7 @@ Turn a short script into a polished product demo for X and your README: real com
 - **Made like the launches you scroll past.** It opens on the product, not a title card; the camera pushes in on the lines that change and pulls back at the end; web demos get a large gliding cursor with click ripples; moves carry a touch of motion blur.
 - **Narration that reads without sound.** One sentence per step appears as a caption, with keycaps for shortcuts. Optional: a local, natural-sounding voice reads it (Kokoro), or you talk over the film on camera (`reel narrate`).
 - **A film and its clips.** Mark steps as feature clips and get 4–15 s loops next to the main film, each as MP4 and GIF.
+- **A longer walkthrough, scene by scene.** List scenes in a `film.toml` (a drawn problem, the same demo without and with your tool, a terminal beside live iOS simulators, a results card computed from the recordings, the install) and get one film of up to 90 s, joined with crossfades. Each scene re-records on its own. Example: `examples/aq/film.toml`.
 - **Real, not staged.** Steps that wait for output fail the recording if it never shows, instead of producing a demo of a broken run.
 
 Supported subjects: terminal CLIs (VHS + tmux), iOS apps on a simulator or a real iPhone (agent-device), web pages (agent-browser) and Mac app windows (agent-desktop + screencapture).
@@ -28,7 +29,7 @@ ln -s ~/demo-reel/skill ~/.claude/skills/demo-reel   # for Claude Code
 ~/demo-reel/bin/reel make ~/demo-reel/examples/aq/reel.toml
 ```
 
-Then ask your agent: "record a demo of this CLI for the README". It writes `docs/demo/reel.toml` in your project, runs `reel make`, and reports the files and the check results.
+Then ask your agent: "record a demo of this CLI for the README". It writes the storyboard under `examples/<project>/reel.toml` here (your project only receives the finished GIF), runs `reel make`, and reports the files and the check results.
 
 A terminal script looks like this:
 
@@ -70,6 +71,10 @@ caption = "Agent A starts a build"
 | `reel narrate <dir>` | Plays the film while recording your camera and voice; adds a picture-in-picture presenter and captions from what you said |
 
 Rendering is plain ffmpeg; title cards and captions are drawn by headless Chrome.
+
+## Where files go
+
+Nothing is written next to `reel.toml`. Deliverables go to `$XDG_DATA_HOME/demo-reel/<title>-<hash>/` (default `~/.local/share/...`; `reel make` prints it), recordings and timelines to `$XDG_STATE_HOME/demo-reel/<title>-<hash>/` (default `~/.local/state/...`), so `reel plan` and `reel compose` can redo a film without recording again. Voice and transcription tools and models live in `$XDG_CACHE_HOME/demo-reel/`.
 
 ## Requirements
 

@@ -9,12 +9,12 @@ description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器或真�
 
 ## 做法
 
-1. 写分镜：放在被演示项目里，通常是 `docs/demo/reel.toml`，演示要用的准备脚本、替身脚本放在它旁边，以后改了代码一句话就能重录。字段见仓库里 `reel/spec.py` 和各录制器文件开头（终端 `reel/record_terminal.py`，iOS `record_ios.py`，网页 `record_web.py`，Mac `record_mac.py`），写法参考 `examples/`；仓库根目录是 `reel` 这个软链所指文件的上两级。
-2. 出片：`reel make docs/demo/reel.toml`。产物都在 `docs/demo/.reel/out/`：`x.mp4`、`readme.gif`、`readme.mp4`、`clips/`、`check.json`。把 `docs/demo/.reel/` 加进项目的 `.gitignore`，只提交最后要用的 GIF 或 mp4。录的是 PATH 上的工具；要录当前检出的构建，在准备脚本里先编译，再把产物目录放到 PATH 前面。
-3. 看检查：`reel make` 最后打印检查结果，有 BAD 就修到全部 ok。泄露截图在 `out/leaks/`。
-4. 自己审片：`reel sheet docs/demo/.reel` 出一张覆盖全片的联系表（24 格，`out/sheet.png`），逐格看：首帧是不是产品画面、每个镜头框住的是不是正在变的地方、标注和画面是否对得上、有没有截断或错位。
-5. 真人出镜（用户要时）：请用户在自己的终端运行 `reel narrate docs/demo/.reel`，边看成片边讲；会生成 `out/x-presenter.mp4` 和 `readme-presenter.mp4`（右下角是用户的摄像头小窗，字幕来自他说的话）。这一步要用户本人在电脑前，终端第一次会要摄像头和麦克风权限。小窗会用 macOS 的人脸识别以脸为中心裁剪；脸贴着摄像头画面底边时没法居中，请用户坐正、让脸在摄像头画面中部。字幕按停顿和句末切成每条不超过 7 个词。人声会先用 RNNoise 降噪，再做低切、压缩、人声提亮、去齿音和响度统一（类似 Adobe Enhance Speech 的思路）；底噪仍然明显时，请用户离麦克风近一些或调高输入音量再录，降噪救不回太小的原始音量。
-6. 交付：告诉用户每个文件的路径、时长、大小、检查结果和你审片看到的问题。发布、上传由用户做；帖子文案交给 x-post。
+1. 写分镜：被演示的项目里只放成片，不放分镜和脚本。分镜写在 demo-reel 仓库的 `examples/<项目名>/reel.toml`（仓库根目录是 `reel` 这个软链所指文件的上两级），演示要用的准备脚本、替身脚本放在它旁边，以后一句话就能重录。字段见 `reel/spec.py` 和各录制器文件开头（终端 `reel/record_terminal.py`，iOS `record_ios.py`，网页 `record_web.py`，Mac `record_mac.py`），写法参考 `examples/` 里现有的几个。
+2. 出片：`reel make examples/<项目名>/reel.toml`。不会在任何项目里生成文件：最终产物（`x.mp4`、`readme.gif`、`readme.mp4`、`clips/`、`check.json`）在 `$XDG_DATA_HOME/demo-reel/<片名>-<短哈希>/`（默认 `~/.local/share/...`），`reel make` 结束时会打印这个目录；录屏、时间线、配音等中间状态在 `$XDG_STATE_HOME/demo-reel/<同名>/`（默认 `~/.local/state/...`），`reel plan` / `compose` 靠它们免重录。最后只把要用的 GIF 复制进被演示项目（如 `docs/demo/demo.gif`）提交。录的是 PATH 上的工具；要录当前检出的构建，在准备脚本里先编译，再把产物目录放到 PATH 前面。
+3. 看检查：`reel make` 最后打印检查结果，有 BAD 就修到全部 ok。泄露截图在产物目录的 `leaks/`。
+4. 自己审片：`reel sheet examples/<项目名>/reel.toml` 出一张覆盖全片的联系表（24 格，产物目录里的 `sheet.png`），逐格看：首帧是不是产品画面、每个镜头框住的是不是正在变的地方、标注和画面是否对得上、有没有截断或错位。
+5. 真人出镜（用户要时）：请用户在自己的终端运行 `reel narrate examples/<项目名>/reel.toml`，边看成片边讲；会在产物目录生成 `x-presenter.mp4` 和 `readme-presenter.mp4`（右下角是用户的摄像头小窗，字幕来自他说的话）。这一步要用户本人在电脑前，终端第一次会要摄像头和麦克风权限。小窗会用 macOS 的人脸识别以脸为中心裁剪；脸贴着摄像头画面底边时没法居中，请用户坐正、让脸在摄像头画面中部。字幕按停顿和句末切成每条不超过 7 个词。人声会先用 RNNoise 降噪，再做低切、压缩、人声提亮、去齿音和响度统一（类似 Adobe Enhance Speech 的思路）；底噪仍然明显时，请用户离麦克风近一些或调高输入音量再录，降噪救不回太小的原始音量。
+6. 交付：告诉用户每个文件的路径、时长、大小、检查结果和你审片看到的问题。要把带声音的视频放进 GitHub README（GIF 没有声音）时：视频必须在 GitHub 网页的文件编辑器里上传，并从网页提交那次编辑，访客才看得到；只上传不提交、或用 git 推送引用同一地址，地址对上传者以外的人一律 404（2026-11-22 在 agent-quay 实测）。这一步要用户同意用他已登录的浏览器操作；提交后用未登录的浏览器确认视频能播放。发布、上传由用户做；帖子文案交给 x-post。
 
 ## 分镜怎么写
 
@@ -23,6 +23,10 @@ description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器或真�
 - 开配音时旁白要短：每句 3～6 个词，8 步合计 15 秒左右；旁白按真实语速播放，30 秒的主片装不下长句。
 - 配音（可选）：加 `[voice]`，`voice = "am_michael"`（美式男声）或 `"bf_emma"`（英式女声），用本地 Kokoro 把每句 `say` 读出来；录制时每步至少停到这句话说完，说话的时段不会被剪掉。所以开了配音整体会变慢：靠时机才出现的画面（比如"排队中"）可能在说完之前就过去了，`wait` 会因此失败，这时把替身脚本的耗时加长，别删掉 `wait`。第一次用会在 `~/.cache/demo-reel/` 装环境、下模型，要十几分钟。产品名、缩写读不准时，加 `speak` 写给配音用的拼读（比如把 `kubectl` 写成 `cube control`），字幕仍显示 `say`；先合成一句听听再决定要不要加。
 - 一条片子讲一件事：步骤多、想法不止一个时，用 `[film] from/to` 只把前几步放进主片，后面的步骤用 `[[clip]]` 单独出短片，都来自同一次录制。
+- 完整介绍片（多场景，可选）：要"问题 → 前后对比 → 用法 → 安装"这种一条片子换几种画面的讲法时，写一个总片文件 `film.toml`，用 `[[scene]] spec = "<场景>.toml"` 按顺序列出场景，`max_seconds` 默认 90。每个场景是一份普通分镜（各自写 `[voice]`），能单独 `reel make <场景>.toml` 重录，再 `reel compose film.toml` 重新拼接、不重录其他场景；`reel make film.toml` 依次录全部场景。场景之间淡入淡出。写法参考 `examples/aq/film.toml`。场景类型除了四种录制，还有：
+  - `kind = "animation"`：`[animation] html = "<页面>.html"`、`seconds`，页面里用 CSS 动画画问题示意，逐帧渲染，不推镜头不剪；旁白用 `[[step]] at = 秒` 加 `say`。每个动画都要写 `both`（如 `animation: x 1s 2s both`），开始前和结束后才停在首尾帧。
+  - `kind = "card"`：`[card] lines = ["Builds run: {a} → {b}"]`，`[card.values]` 里每个值是一条 shell 命令的输出（从录制日志算出来），命令失败或没输出就停止出片；每次 `reel compose film.toml` 都会重画。
+  - 终端场景加 `[[device]]`：`name`（手机下方的标签）和 `find`（每 0.5 秒执行一次、打印出模拟器 UDID 时开始录这台手机）。手机排在终端右侧，开始录之前显示暗屏。手机画面靠 `xcrun simctl io recordVideo` 单独录，不需要窗口。模拟器上的变化（页面加载）在录屏时会慢好几秒：让演示命令等到画面真的变了再返回并打印一行，步骤用 `wait` 等这行（参考 `examples/aq/setup-sims.sh` 的 `sim-show`）。
 - 功能短片：用 `[[clip]]` 标出 `name`、`from`、`to`（步骤编号，从 1 起），从同一次录制剪出 4～15 秒、首尾能循环的短片，适合 README 各功能小节或后续帖子。
 - 打字按每字 45 毫秒上屏（`[terminal] typing_ms` 可调），80 个字符的命令约 3.6 秒；命令尽量短，长路径先放进准备脚本或别名。
 - 结论要看得见：关键数字或结果单独打印一行（如 `build 5.1s → 1.5s`），不要埋在长行中间。
@@ -39,11 +43,13 @@ description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器或真�
 | 现象 | 怎么办 |
 |---|---|
 | `step N failed` / `exited with` | 演示本身出错了。如实告诉用户哪一步、什么输出；不要为了出片改被演示项目的代码 |
-| `sensitive text` 为 BAD | 看 `leaks/` 截图，改分镜或准备脚本让它不出现，再重录；不要只改检查规则 |
+| `sensitive text` 为 BAD | 看产物目录里的 `leaks/` 截图，改分镜或准备脚本让它不出现，再重录；不要只改检查规则 |
 | `readme.gif size` 为 BAD | 缩短演示或减少整屏变化；GIF 上限可用 `gif_max_mb` 调低，不能调高过 10 |
 | `no active display`（Mac） | 屏幕没亮或已锁定，请用户在场时再录 |
 | `clips/... loops` 为 BAD | 短片首尾差太多，通常是范围里最后一步还在大幅变化；把 `to` 改到画面稳定的那一步 |
 | `narration loudness` 为 BAD | 配音没混进去或太轻：看 `voice/` 里有没有每步的 wav |
+| `scene <名字>: ...`（总片） | 那个场景失败了，其他场景的录制都还在：修好后 `reel make <场景>.toml`，再 `reel compose film.toml` |
+| `no recording of <设备>` | 终端场景里 `[[device]]` 的 `find` 一直没打印出 UDID：在准备脚本里确认模拟器借到了、命令能单独跑通 |
 | 镜头切得早或晚 | 看 `reel sync <目录>` 的 delta；终端录制会用每条命令回车的时刻自动校正 |
 
 ## 依赖

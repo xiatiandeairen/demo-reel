@@ -1,0 +1,14 @@
+# Scene 1: the problem, drawn (problem.html).
+title = "aq problem"
+kind = "animation"
+
+[voice]
+voice = "am_michael"
+
+[animation]
+html = "problem.html"
+seconds = 6
+
+[[step]]
+at = 0.4
+say = "Three agents. One Mac."

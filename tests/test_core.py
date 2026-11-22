@@ -175,3 +175,29 @@ class PresenterCaptions(unittest.TestCase):
         self.assertEqual(lines[-1]["text"], "Done.")  # the pause starts a new line
         for a, b in zip(lines, lines[1:]):
             self.assertLessEqual(a["end"], b["start"])  # never two lines at once
+
+
+class Storage(unittest.TestCase):
+    # CASE-B10: nothing is written next to reel.toml; state and deliverables follow XDG
+    def test_xdg_locations_and_distinct_names(self):
+        import os
+        import tempfile
+        from pathlib import Path
+        from reel import paths
+        with tempfile.TemporaryDirectory() as home:
+            old = {k: os.environ.get(k) for k in ("XDG_STATE_HOME", "XDG_DATA_HOME")}
+            os.environ["XDG_STATE_HOME"], os.environ["XDG_DATA_HOME"] = f"{home}/state", f"{home}/data"
+            try:
+                a = {"title": "aq", "_path": "/repo-one/docs/demo/reel.toml"}
+                b = {"title": "aq", "_path": "/repo-two/docs/demo/reel.toml"}
+                sa, sb = paths.state_dir(a), paths.state_dir(b)
+                self.assertNotEqual(sa, sb)  # same title in two projects: two directories
+                self.assertTrue(str(sa).startswith(f"{home}/state/demo-reel/aq-"))
+                self.assertEqual(paths.deliverables(sa), Path(f"{home}/data/demo-reel") / sa.name)
+                self.assertNotIn("/repo-one", str(sa))
+            finally:
+                for k, v in old.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v

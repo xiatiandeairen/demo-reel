@@ -1,0 +1,8 @@
+# A film from scenes that have nothing to do with aq (CASE-C6): a drawn intro, then the TodoMVC demo.
+title = "todomvc film"
+max_seconds = 60
+
+[[scene]]
+spec = "intro.toml"
+[[scene]]
+spec = "reel.toml"

@@ -52,8 +52,10 @@ def _window(tl: dict, start: float, end: float, with_cards: bool = False) -> dic
 
 
 def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bool = False,
-            with_cards: bool = False) -> Path:
+            with_cards: bool = False, fade_out: bool = True) -> Path:
     """Renders the timeline (or only stage seconds `window`) to out_path.
+
+    fade_out: end on a fade to black (off for a scene, which the film joins with a crossfade).
 
     loop: the last LOOP_FADE seconds fade into the first frame, so the clip repeats without a jump.
     """
@@ -131,7 +133,7 @@ def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bo
             g.append(f"[{last}][outro]xfade=transition=fade:duration={XFADE}:offset={offset + body - XFADE:.3f}[withoutro]")
             last, n = "withoutro", n + 1
 
-        if not loop:
+        if not loop and fade_out:
             # The main film fades out on the whole stage instead of stopping dead (review: "ends abruptly").
             total = body + sum(tl[k]["seconds"] - XFADE for k in ("intro", "outro") if tl.get(k))
             g.append(f"[{last}]fade=t=out:st={max(0.0, total - FADE_OUT):.3f}:d={FADE_OUT}[faded]")
@@ -149,6 +151,17 @@ def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bo
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *inputs, "-/filter_complex", str(script),
                         "-map", f"[{last}]", "-c:v", "libx264", "-crf", "18", "-preset", "slow",
                         "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_path)], check=True)
+    return Path(out_path)
+
+
+def fade_end(video: Path, out_path: Path) -> Path:
+    """The video with its last FADE_OUT seconds fading to black."""
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
+                       capture_output=True, text=True, check=True)
+    end = float(r.stdout.strip())
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(video), "-vf",
+                    f"fade=t=out:st={max(0.0, end - FADE_OUT):.3f}:d={FADE_OUT}", "-c:v", "libx264", "-crf", "18",
+                    "-preset", "slow", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out_path)], check=True)
     return Path(out_path)
 
 

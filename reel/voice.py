@@ -16,7 +16,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-VENV = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "demo-reel" / "tts-venv"
+from . import paths
+
+VENV = paths.cache_root() / "tts-venv"
 MODEL = "prince-canuma/Kokoro-82M"
 DEFAULT_VOICE = "am_michael"
 
@@ -77,7 +79,7 @@ def prepare(spec: dict, out: Path) -> None:
     cfg = spec.get("voice")
     if not cfg:
         return
-    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "demo-reel" / "voice"
+    cache = paths.cache_root() / "voice"
     for i, s in enumerate(spec["step"], 1):
         # `speak` spells out what the voice should say when the caption's spelling would mislead it.
         text = s.get("speak") or s.get("say") or s.get("caption")

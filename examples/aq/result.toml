@@ -1,0 +1,14 @@
+# Scene 5: what the two runs above measured. build.sh appends "<start> <end>" to runs.log on every
+# real run, so these figures are counted from the recordings, never typed in.
+title = "aq result"
+kind = "card"
+
+[card]
+seconds = 4
+lines = ["Builds run: {runs_without} → {runs_with}", "Build time: {secs_without} s → {secs_with} s"]
+
+[card.values]
+runs_without = "wc -l < /tmp/aq-demo-without/runs.log | tr -d ' '"
+runs_with = "wc -l < /tmp/aq-demo-with/runs.log | tr -d ' '"
+secs_without = "awk '{ s += $2 - $1 } END { print s }' /tmp/aq-demo-without/runs.log"
+secs_with = "awk '{ s += $2 - $1 } END { print s }' /tmp/aq-demo-with/runs.log"

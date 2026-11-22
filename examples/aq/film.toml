@@ -1,0 +1,20 @@
+# The full aq walkthrough (about 70 s): the problem, the same three agents without and with aq,
+# borrowing simulators, the measured result, then how to install. Each scene is an ordinary spec
+# that `reel make <scene>.toml` can record on its own; `reel compose film.toml` joins them again.
+# The 30-second film and GIF still come from reel.toml.
+title = "aq walkthrough"
+url = "github.com/xiatiandeairen/agent-quay"
+max_seconds = 90
+
+[[scene]]
+spec = "problem.toml"
+[[scene]]
+spec = "without-aq.toml"
+[[scene]]
+spec = "with-aq.toml"
+[[scene]]
+spec = "borrow.toml"
+[[scene]]
+spec = "result.toml"
+[[scene]]
+spec = "install.toml"

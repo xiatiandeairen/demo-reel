@@ -8,14 +8,21 @@ Spec fields for kind = "terminal":
     teardown = "teardown.sh"  # run after recording, even if it failed: bash teardown.sh <workdir>
     init = "cd $REEL_WORK"    # run in every pane before recording (not shown)
     font_size = 40            # 48-54 for one pane, so README-sized frames stay readable
+    open_hold = 1.5           # seconds on the whole layout before the first step (0.6 for a film's later scene)
     typing_ms = 45            # per character; long commands cost len x this on screen
     theme = "Catppuccin Mocha"
     prompt = "$ "
+    layout = "tiled"          # tmux layout: tiled (grid) or even-vertical (stacked rows)
 
     [[pane]]                  # one or more; laid out in a grid, row by row
     name = "agent A"
     run = "aq status --top"   # optional: started before recording, not typed on screen
     noisy = true              # optional: keeps changing (a dashboard); not counted as activity
+
+    [[device]]                # optional: an iOS simulator shown beside the terminal, right of it
+    name = "A's simulator"    # label under the phone; also a focus name
+    find = "cat $REEL_WORK/sim"   # shell command polled every 0.5 s until it prints the simulator's
+                              # UDID; recording of that simulator starts then (a placeholder before)
 
     [[step]]
     pane = "agent A"          # where to type (default: the first pane)
@@ -33,14 +40,22 @@ How timing works: before each step the tape presses a tmux key that runs mark.sh
 appends the wall-clock time to events.log; the shells in the panes log when each command
 starts and ends. The first mark is taken just before recording starts and the last just
 before it stops; video time is mapped linearly between them.
+
+Devices are recorded apart from the terminal, with `xcrun simctl io <udid> recordVideo` (no window
+needed), from the moment "Recording started" is printed. That wall-clock time, minus the stage's
+own start, places each phone's video on the stage (device_placement).
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
+import signal
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 W, H = 3840, 2160  # 2x the output, so a 3x zoom is only a 1.5x upscale
@@ -50,6 +65,21 @@ TYPING_MS = 45
 SHOW_DELAY = 0.3   # tape: Sleep between the first mark and Show
 MARK_OFF, MARK_ON, MARK_GLYPH = 235, 238, "█"  # xterm greys #262626 / #444444: barely visible, easy to detect
 RETIME_FPS = 30
+PHONE_ASPECT = 1206 / 2622   # iPhone 17 Pro screen, as recordVideo writes it
+DEVICE_GAP, DEVICE_LABEL = 80, 120
+UDID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
+
+
+def device_rects(n: int) -> tuple:
+    """(terminal width, [phone screen rect]) for n phones in a column band on the right of the stage."""
+    if not n:
+        return W, []
+    sh = H - 2 * MARGIN - DEVICE_LABEL
+    sw = round(sh * PHONE_ASPECT)
+    band = n * sw + (n + 1) * DEVICE_GAP
+    term_w = W - band + DEVICE_GAP  # the terminal's own right margin is the first gap
+    rects = [[term_w + k * (sw + DEVICE_GAP), MARGIN, term_w + k * (sw + DEVICE_GAP) + sw, MARGIN + sh] for k in range(n)]
+    return term_w, rects
 
 
 class RecordError(RuntimeError):
@@ -90,6 +120,10 @@ def record(spec: dict, out: Path) -> Path:
             if key in s and s[key] not in names:
                 raise RecordError(f"step {i}: no pane named {s[key]!r}")
 
+    devices = spec.get("device", [])
+    if devices and shutil.which("xcrun") is None:
+        raise RecordError("devices need Xcode's xcrun")
+    term_w, _ = device_rects(len(devices))
     out = Path(out).resolve()
     # The demo runs in a neutral directory: paths printed on screen must not show your home folder.
     work = Path(term.get("workdir", f"/tmp/reel-{_slug(spec['title'])}"))
@@ -104,13 +138,20 @@ def record(spec: dict, out: Path) -> Path:
 
     if term.get("setup"):
         setup = Path(spec["_dir"]) / term["setup"]
-        subprocess.run([bash, str(setup), str(work)], check=True, env=env, cwd=spec["_dir"])
+        r = subprocess.run([bash, str(setup), str(work)], env=env, cwd=spec["_dir"])
+        if r.returncode != 0:
+            if term.get("teardown"):  # give back whatever the setup borrowed before it failed
+                subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env, cwd=spec["_dir"])
+            raise RecordError(f"setup {term['setup']} exited with {r.returncode}")
     work.mkdir(parents=True, exist_ok=True)
     log = work / "events.log"
     log.write_text("")
 
     from . import cards
     cards.background(work / "bg.png", spec["accent"], W, H)
+    if devices:
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(work / "bg.png"), "-vf",
+                        f"crop={term_w}:{H}:0:0", str(work / "bg-term.png")], check=True)
 
     # Every pane's shell logs command start/end with the pane name and exit code.
     prompt = term.get("prompt", "$ ")
@@ -160,7 +201,7 @@ fi
         tmux("set", "-g", "pane-border-status", "top", ";", "set", "-g", "pane-border-format", " #{pane_title} ")
     for name in names[1:]:
         tmux("split-window", "-t", "reel", shell(name))
-        tmux("select-layout", "-t", "reel", "tiled")
+        tmux("select-layout", "-t", "reel", term.get("layout", "tiled"))
     ids = subprocess.run(["tmux", "-L", sock, "list-panes", "-t", "reel", "-F", "#{pane_id}"],
                          capture_output=True, text=True, check=True, env=env).stdout.split()
     for pid, p in zip(ids, panes):
@@ -172,38 +213,97 @@ fi
     tmux("bind", "M", "run-shell", str(mark))
     tmux("select-pane", "-t", ids[0])
 
-    tape = _tape(spec, term, names, work, sock)
+    tape = _tape(spec, term, names, work, sock, term_w)
     (work / "demo.tape").write_text(tape)
+    recorders = _DeviceRecorders(devices, work, env, bash)
     try:
+        recorders.start()
         r = subprocess.run(["vhs", str(work / "demo.tape")], env=env, cwd=work,
                            capture_output=True, text=True)
     finally:
+        recorders.stop()
         subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True)
+        td = None
         if term.get("teardown"):
-            subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env, cwd=spec["_dir"])
+            td = subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env,
+                                cwd=spec["_dir"], capture_output=True, text=True)
     marks = [float(l.split()[0]) for l in log.read_text().splitlines() if " mark " in l]
+    if r.returncode == 0 and td is not None and td.returncode != 0:
+        raise RecordError(f"teardown failed: {(td.stderr or td.stdout).strip()}")
     if r.returncode != 0:
         failed = max(0, len(marks) - 1)  # marks: 1 before Show, then one per started step
         detail = (r.stderr or r.stdout).strip().splitlines()[-3:]
         raise RecordError(f"step {failed} failed: {steps[failed - 1].get('wait') and 'waited for ' + repr(steps[failed - 1]['wait']) + ': ' or ''}"
                           + " / ".join(detail))
-    return _events(spec, panes, steps, work, out)
+    return _events(spec, panes, steps, work, out, recorders.takes, term_w)
+
+
+class _DeviceRecorders:
+    """Finds each device's UDID while the demo runs and records its screen from then on."""
+
+    def __init__(self, devices, work, env, bash):
+        self.devices, self.work, self.env, self.bash = devices, work, env, bash
+        self.takes = [None] * len(devices)  # {"path", "started", "udid"} once recording
+        self.procs, self.done = [], threading.Event()
+        self.threads = [threading.Thread(target=self._run, args=(k,), daemon=True) for k in range(len(devices))]
+
+    def start(self):
+        for t in self.threads:
+            t.start()
+
+    def _run(self, k):
+        d = self.devices[k]
+        while not self.done.is_set():
+            r = subprocess.run([self.bash, "-c", d["find"]], capture_output=True, text=True, env=self.env)
+            udid = r.stdout.strip().splitlines()[-1].strip() if r.stdout.strip() else ""
+            if UDID.match(udid):
+                break
+            time.sleep(0.5)
+        else:
+            return
+        path = self.work / f"device{k}.mp4"
+        p = subprocess.Popen(["xcrun", "simctl", "io", udid, "recordVideo", "--codec=h264", "--force", str(path)],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.procs.append(p)
+        for line in p.stdout:
+            if "Recording started" in line:
+                self.takes[k] = {"path": str(path), "started": time.time(), "udid": udid}
+                break
+        threading.Thread(target=p.stdout.read, daemon=True).start()  # drain the rest
+
+    def stop(self):
+        self.done.set()
+        for p in self.procs:
+            if p.poll() is None:
+                p.send_signal(signal.SIGINT)
+        for p in self.procs:
+            try:
+                p.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+
+def device_placement(started_wall: float, t0: float) -> tuple:
+    """(delay, trim) in seconds for a device recording that started at wall time started_wall, on a
+    stage whose time 0 is wall time t0: start it later, or cut its head if it began first (CASE-C3.2)."""
+    d = round(started_wall - t0, 3)
+    return (d, 0.0) if d >= 0 else (0.0, -d)
 
 
 def _slug(s: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in s.lower()).strip("-") or "demo"
 
 
-def _tape(spec, term, names, work, sock) -> str:
+def _tape(spec, term, names, work, sock, term_w=W) -> str:
     font = term.get("font_size", 40)
     lines = [
         f'Output "{work}/stage.mp4"',
         "Require tmux",
         "Set Shell bash",
         f"Set FontSize {font}",
-        f"Set Width {W}", f"Set Height {H}",
+        f"Set Width {term_w}", f"Set Height {H}",
         f"Set Padding {PADDING}", f"Set Margin {MARGIN}",
-        f'Set MarginFill "{work}/bg.png"',
+        f'Set MarginFill "{work}/{"bg.png" if term_w == W else "bg-term.png"}"',
         "Set WindowBar Colorful", f"Set WindowBarSize {BAR}", "Set BorderRadius 20",
         f'Set Theme "{term.get("theme", "Catppuccin Mocha")}"',
         f"Set TypingSpeed {term.get('typing_ms', TYPING_MS)}ms",
@@ -215,7 +315,7 @@ def _tape(spec, term, names, work, sock) -> str:
         "Ctrl+B", 'Type "M"',
         f"Sleep {SHOW_DELAY}s",
         "Show",
-        "Sleep 1.5s",  # the whole layout first, then the camera moves in
+        f"Sleep {float(term.get('open_hold', 1.5))}s",  # the whole layout first, then the camera moves in
     ]
     for i, s in enumerate(spec["step"], 1):
         lines += [f"# step {i}", "Ctrl+B", 'Type "M"']
@@ -233,7 +333,9 @@ def _tape(spec, term, names, work, sock) -> str:
         typed = len(s.get("type", "")) * term.get("typing_ms", TYPING_MS) / 1000 + (0.4 if s.get("type") else 0)
         hold = max(float(s.get("hold", 1.0)), s.get("_narration", 0.0) + 0.3 - typed)
         lines.append(f"Sleep {hold:.2f}s")
-    lines += ["Ctrl+B", 'Type "M"', "Hide", "Sleep 0.5s"]
+    # Stay visible a moment after the end mark, so its flip is in the video and the last stretch is
+    # timed from it rather than extrapolated (which came out seconds short on a busy machine).
+    lines += ["Ctrl+B", 'Type "M"', "Sleep 0.6s", "Hide", "Sleep 0.5s"]
     return "\n".join(lines) + "\n"
 
 
@@ -243,7 +345,7 @@ def _probe_duration(path: Path) -> float:
     return float(r.stdout.strip())
 
 
-def _events(spec, panes, steps, work, out) -> Path:
+def _events(spec, panes, steps, work, out, takes=(), term_w=W) -> Path:
     stage = work / "stage.mp4"
     final = out / "stage.mp4"
     if stage.exists():
@@ -261,7 +363,7 @@ def _events(spec, panes, steps, work, out) -> Path:
         raise RecordError(f"expected {len(steps) + 2} step marks, got {len(marks)}")
     # mark 0 is SHOW_DELAY before the first frame; the last mark is right before the last frame.
     t0 = marks[0] + SHOW_DELAY
-    regions = _regions(panes, work)
+    regions = _regions(panes, work, term_w)
     # VHS drops frames when it cannot capture in time (about 20% at 4K, unevenly: worst while the
     # machine is busy), so the video runs faster than reality. The marker cell tells when each step
     # mark shows up in the video; the video is stretched back to wall-clock time piece by piece, so
@@ -279,6 +381,13 @@ def _events(spec, panes, steps, work, out) -> Path:
     dropped = round(1 - duration / max(marks[-1] - t0, 1e-3), 3)
     _retime(final, pairs, duration, work)
     duration = _probe_duration(final)
+    devices = spec.get("device", [])
+    if devices:
+        placed = _add_devices(final, devices, takes, t0, duration, work, spec)
+        for d, rect in zip(devices, device_rects(len(devices))[1]):
+            regions[d["name"]] = rect
+    else:
+        placed = []
     vt = lambda wall: round(min(max(0.0, wall - t0), duration), 3)
     cmds, open_ = [], {}
     names = [p["name"] for p in panes]
@@ -326,16 +435,18 @@ def _events(spec, panes, steps, work, out) -> Path:
         "commands": cmds,
         "sync": {"marks": len(marks), "method": method, "marks_seen": len(flips), "frames_dropped": dropped},
     }
+    if placed:
+        events["devices"] = placed
     path = out / "events.json"
     path.write_text(json.dumps(events, indent=2, ensure_ascii=False) + "\n")
     return path
 
 
-def _regions(panes, work) -> dict:
+def _regions(panes, work, term_w=W) -> dict:
     lines = (work / "geometry").read_text().split("\n")
     cols, rows = (int(v) for v in lines[0].split())
     x0, y0 = MARGIN + PADDING, MARGIN + BAR + PADDING
-    cw = (W - 2 * (MARGIN + PADDING)) / cols
+    cw = (term_w - 2 * (MARGIN + PADDING)) / cols
     ch = (H - y0 - MARGIN - PADDING) / (rows + 1)  # + the status line
     regions = {"full": [0, 0, W, H],
                "_marker": [round(x0 + (cols - 1) * cw, 1), round(y0 + rows * ch, 1),
@@ -347,6 +458,46 @@ def _regions(panes, work) -> dict:
         regions[p["name"]] = [round(x0 + left * cw, 1), round(top_px, 1),
                               round(x0 + (left + width) * cw, 1), round(y0 + (top + height) * ch, 1)]
     return regions
+
+
+def _add_devices(stage_mp4: Path, devices, takes, t0, duration, work, spec) -> list:
+    """Widens the stage to W and lays each phone's recording into the band on the right."""
+    from . import cards
+    term_w, rects = device_rects(len(devices))
+    frame = work / "devices.png"
+    cards.device_frames(frame, [d["name"] for d in devices], rects, W, H)
+    sw, sh = rects[0][2] - rects[0][0], rects[0][3] - rects[0][1]
+    mask = work / "screen-mask.png"
+    cards.rounded_mask(mask, sw, sh, round(sw * 0.12))
+    inputs = ["-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(work / "bg.png"),
+              "-i", str(stage_mp4), "-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(frame),
+              "-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(mask)]
+    g = ["[0:v][1:v]overlay=0:0:shortest=1[s0]", "[s0][2:v]overlay=0:0[s1]", "[3:v]format=gray,split=" + str(len(devices))
+         + "".join(f"[m{k}]" for k in range(len(devices)))]
+    last, n, placed = "s1", 4, []
+    for k, (d, take, rect) in enumerate(zip(devices, takes, rects)):
+        if not take or not Path(take["path"]).exists():
+            placed.append({"name": d["name"], "recorded": False})
+            continue
+        delay, trim = device_placement(take["started"], t0)
+        inputs += ["-i", take["path"]]
+        # recordVideo writes a frame only when the screen changes: make it constant-rate first, or
+        # trimming a still opening would pull every later frame early.
+        g.append(f"[{n}:v]fps={RETIME_FPS},trim=start={trim:.3f},setpts=PTS-STARTPTS+{delay:.3f}/TB,"
+                 f"scale={sw}:{sh}:flags=lanczos,format=yuva420p[d{k}]")
+        g.append(f"[d{k}][m{k}]alphamerge[r{k}]")
+        g.append(f"[{last}][r{k}]overlay={rect[0]}:{rect[1]}:eof_action=repeat[o{k}]")
+        last, n = f"o{k}", n + 1
+        placed.append({"name": d["name"], "recorded": True, "udid": take["udid"], "delay": delay, "trim": trim})
+    wide = work / "stage-wide.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(g), "-map", f"[{last}]",
+                    "-t", f"{duration:.3f}", "-c:v", "libx264", "-crf", "16", "-preset", "medium",
+                    "-pix_fmt", "yuv420p", str(wide)], check=True)
+    shutil.move(str(wide), stage_mp4)
+    missing = [p["name"] for p in placed if not p["recorded"]]
+    if missing:
+        raise RecordError(f"no recording of {', '.join(missing)}: its find command never printed a UDID")
+    return placed
 
 
 def _mark_times(video: Path, cell) -> list:

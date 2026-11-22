@@ -16,6 +16,7 @@
 - **像你在时间线上刷到的发布视频。** 第一帧就是产品，不放标题卡；镜头推到正在变化的那几行，结尾拉回全景；网页演示有放大、平滑移动的光标和点击涟漪；推拉时带一点运动模糊。
 - **静音也看得懂的旁白。** 每步一句旁白作为字幕，快捷键显示成按键徽标。可选：用本地仿真人声音（Kokoro）读出来，或者你自己边看边讲、出镜（`reel narrate`）。
 - **一条主片加几段短片。** 在分镜里标出功能短片，主片之外再得到几段 4～15 秒、可循环的短片，每段都有 MP4 和 GIF。
+- **分场景的完整介绍片。** 在 `film.toml` 里按顺序列出场景（画出来的问题示意、同一个演示没有和有你的工具各跑一遍、终端旁边并排真实的 iOS 模拟器、从录制日志算出数字的结果卡、安装），拼成一条 90 秒以内、场景间淡入淡出的片子；每个场景能单独重录。示例：`examples/aq/film.toml`。
 - **真实运行，不摆拍。** 写了"等待某段输出"的步骤，等不到就判录制失败，不会产出一段跑坏了的演示。
 
 支持的对象：终端 CLI（VHS + tmux）、iOS 模拟器或真机上的 App（agent-device）、网页（agent-browser）、Mac 应用窗口（agent-desktop + screencapture）。
@@ -28,7 +29,7 @@ ln -s ~/demo-reel/skill ~/.claude/skills/demo-reel   # 给 Claude Code 用
 ~/demo-reel/bin/reel make ~/demo-reel/examples/aq/reel.toml
 ```
 
-之后对 agent 说"给这个 CLI 录个 README 用的演示"。它会在项目里写 `docs/demo/reel.toml`，运行 `reel make`，再报告产出的文件和检查结果。分镜写法见 [examples/](examples/) 和 [README.md](README.md#quick-start) 里的示例。
+之后对 agent 说"给这个 CLI 录个 README 用的演示"。它会在本仓库的 `examples/<项目名>/reel.toml` 写分镜（你的项目里只放最后的 GIF），运行 `reel make`，再报告产出的文件和检查结果。分镜写法见 [examples/](examples/) 和 [README.md](README.md#quick-start) 里的示例。
 
 ## 命令
 
@@ -44,6 +45,10 @@ ln -s ~/demo-reel/skill ~/.claude/skills/demo-reel   # 给 Claude Code 用
 | `reel narrate <目录>` | 播放成片，同时录你的摄像头和声音，加上右下角出镜小窗和由你的话生成的字幕 |
 
 合成只用 ffmpeg；标题卡和标注由无界面的 Chrome 绘制。
+
+## 文件放在哪
+
+`reel.toml` 旁边不会生成任何文件。最终产物在 `$XDG_DATA_HOME/demo-reel/<片名>-<短哈希>/`（默认 `~/.local/share/...`，`reel make` 结束时会打印），录屏和时间线在 `$XDG_STATE_HOME/demo-reel/<同名>/`（默认 `~/.local/state/...`），所以 `reel plan`、`reel compose` 不用重录就能重新出片。配音和语音识别用的环境与模型在 `$XDG_CACHE_HOME/demo-reel/`。
 
 ## 依赖
 

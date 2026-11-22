@@ -1,0 +1,38 @@
+# Scene 6: installing. brew prints "already installed" on a Mac that has aq; the plugin is really
+# installed, into a throwaway Claude Code config (setup-install.sh), and teardown-install.sh fails
+# the recording if your own plugin list changed.
+title = "aq"
+kind = "terminal"
+max_seconds = 45  # a scene of film.toml, which holds the film to 90 s
+outro = true
+subtitle = "github.com/xiatiandeairen/agent-quay"
+url = "github.com/xiatiandeairen/agent-quay"
+
+[voice]
+voice = "am_michael"
+
+[terminal]
+workdir = "/tmp/aq-demo-install"
+setup = "setup-install.sh"
+teardown = "teardown-install.sh"
+open_hold = 0.6  # a later scene of the film: the crossfade already shows the layout
+init = "export CLAUDE_CONFIG_DIR=$REEL_WORK/claude HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1; cd $REEL_WORK"
+font_size = 52
+
+[[step]]
+type = "brew install xiatiandeairen/tap/aq"
+wait = "already installed|Pouring|Installing"
+timeout = 60
+say = "Install with Homebrew."
+hold = 1.0
+[[step]]
+type = "claude plugin marketplace add xiatiandeairen/agent-quay"
+wait = "Added marketplace"
+timeout = 60
+say = "Add the Claude Code plugin."
+hold = 0.3
+[[step]]
+type = "claude plugin install agent-quay@agent-quay"
+wait = '✔[\s\S]*✔'  # the second check mark: marketplace added, then plugin installed
+timeout = 60
+hold = 1.5
