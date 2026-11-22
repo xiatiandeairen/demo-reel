@@ -36,7 +36,8 @@ def shift_items(per_scene: list, starts: list) -> list:
 
 def make_all(scenes: list, make) -> None:
     """Makes the scenes in order; a failure names its scene and leaves finished scenes as they are (CASE-C8)."""
-    for p in scenes:
+    for k, p in enumerate(scenes, 1):
+        print(f"scene {k}/{len(scenes)}: {Path(p).name}", flush=True)
         try:
             make(p)
         except Exception as e:  # noqa: BLE001 - reported with the scene's name, then stops the film

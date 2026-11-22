@@ -165,19 +165,34 @@ def fade_end(video: Path, out_path: Path) -> Path:
     return Path(out_path)
 
 
+TARGET_LUFS = -16.0
+
+
+def clip_gain(wav: Path) -> float:
+    """dB that brings one sentence to TARGET_LUFS. Normalising each sentence before mixing keeps sparse
+    narration at the target; one loudnorm over the whole mix fell to -24 LUFS on a scene with two
+    short sentences (2026-11-22)."""
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(wav), "-af", "ebur128=framelog=quiet",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    import re
+    m = re.findall(r"I:\s+(-?[\d.]+) LUFS", r.stderr)
+    lufs = float(m[-1]) if m else TARGET_LUFS
+    return round(TARGET_LUFS - lufs, 2) if lufs > -70 else 0.0
+
+
 def add_narration(video: Path, items: list, out_path: Path) -> Path:
-    """Mixes narration clips [(wav, seconds into the video)] under the video, at -16 LUFS, the
-    loudness most social platforms normalise to (CASE-B7.2)."""
+    """Mixes narration clips [(wav, seconds into the video)] under the video: each sentence at -16 LUFS,
+    the loudness most social platforms normalise to (CASE-B7.2), peaks limited to about -1.5 dBTP."""
     inputs, chains = ["-i", str(video)], []
     for i, (wav, at) in enumerate(items, 1):
         inputs += ["-i", str(wav)]
         ms = int(at * 1000)
-        chains.append(f"[{i}:a]aresample=48000,adelay={ms}|{ms}[n{i}]")
+        chains.append(f"[{i}:a]aresample=48000,volume={clip_gain(Path(wav))}dB,adelay={ms}|{ms}[n{i}]")
     mix = "".join(f"[n{i}]" for i in range(1, len(items) + 1))
     r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(video)],
                        capture_output=True, text=True, check=True)
     end = float(r.stdout.strip())
-    graph = (";".join(chains) + f";{mix}amix=inputs={len(items)}:normalize=0,apad,loudnorm=I=-16:TP=-1.5:LRA=11,"
+    graph = (";".join(chains) + f";{mix}amix=inputs={len(items)}:normalize=0,apad,alimiter=limit=0.84:level=false,"
              f"afade=t=out:st={max(0.0, end - FADE_OUT):.3f}:d={FADE_OUT}[a]")
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *inputs, "-filter_complex", graph, "-map", "0:v",
                     "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",

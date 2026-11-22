@@ -74,9 +74,9 @@ class OwnSimulators(unittest.TestCase):
             tail = [v for t, v in colours if end - 3.0 <= t <= end - 0.2]
             self.assertTrue(tail and all(v == label for v in tail), f"{name}: {tail}")
 
-    # CASE-C3.1: in the film, a phone changes only after its command was entered, and within 6 s
-    # (film time). Safari's moving progress bar keeps a slow load from being cut as idle; while
-    # recording, a page takes 3-5 s to load (under 1 s on an idle machine), so the bound is 6 s.
+    # CASE-C3.1: in the film, a phone changes only after its command was entered, and within 3 s
+    # (film time; the sim-open steps are marked squeeze, so a slow page load is cut although Safari's
+    # progress bar moves).
     def test_phones_follow_their_commands(self):
         for name, dev_of in (("without-aq.toml", {"A": "the only simulator", "B": "the only simulator"}),
                              ("borrow.toml", {"A": "agent A's simulator", "B": "agent B's simulator"})):
@@ -91,7 +91,7 @@ class OwnSimulators(unittest.TestCase):
                 self.assertIsNotNone(t, f"{name}: {label}'s page never showed")
                 self.assertGreaterEqual(t, cmd["start"] - 0.1, f"{name}: {label}'s page showed before its command")
                 shown_at, typed_at = film_time(tl, t), film_time(tl, cmd["start"])
-                self.assertLessEqual(shown_at - typed_at, 6.0, f"{name}: {label}'s page took over 6 s in the film")
+                self.assertLessEqual(shown_at - typed_at, 3.0, f"{name}: {label}'s page took over 3 s in the film")
 
 
 @unittest.skipUnless(RUN, "set REEL_INTEGRATION=1")

@@ -32,6 +32,8 @@ Spec fields for kind = "terminal":
                               # counts too: for a second "ok" write 'ok[\s\S]*ok') ...
     timeout = 30              # ... within this many seconds, else the recording fails
     allow_fail = false        # a typed command exiting non-zero fails the recording
+    squeeze = false           # cut the middle of this command's run even while the screen moves (a page
+                              # loading, a clone): keeps 0.5 s after the start, 1.5 s before the end, and the narration
     focus = "agent A"         # pane name(s) to frame, "full", or omit to follow the change
     hold = 1.0
     caption = "..."
@@ -382,12 +384,23 @@ def _events(spec, panes, steps, work, out, takes=(), term_w=W) -> Path:
     _retime(final, pairs, duration, work)
     duration = _probe_duration(final)
     devices = spec.get("device", [])
+    raw_takes = []
     if devices:
-        placed = _add_devices(final, devices, takes, t0, duration, work, spec)
+        # Keep the sources: the terminal alone and each phone's own recording, so the composite can be
+        # rebuilt by `reel plan` without recording again (composite_devices).
+        shutil.copy(final, out / "stage-term.mp4")
+        (out / "devices").mkdir(exist_ok=True)
+        for k, (d, take) in enumerate(zip(devices, takes)):
+            row = {"name": d["name"], "recorded": bool(take and Path(take["path"]).exists())}
+            if row["recorded"]:
+                shutil.copy(take["path"], out / "devices" / f"device{k}.mp4")
+                row.update(path=f"devices/device{k}.mp4", started=take["started"], udid=take["udid"])
+            raw_takes.append(row)
+        missing = [r["name"] for r in raw_takes if not r["recorded"]]
+        if missing:
+            raise RecordError(f"no recording of {', '.join(missing)}: its find command never printed a UDID")
         for d, rect in zip(devices, device_rects(len(devices))[1]):
             regions[d["name"]] = rect
-    else:
-        placed = []
     vt = lambda wall: round(min(max(0.0, wall - t0), duration), 3)
     cmds, open_ = [], {}
     names = [p["name"] for p in panes]
@@ -435,10 +448,13 @@ def _events(spec, panes, steps, work, out, takes=(), term_w=W) -> Path:
         "commands": cmds,
         "sync": {"marks": len(marks), "method": method, "marks_seen": len(flips), "frames_dropped": dropped},
     }
-    if placed:
-        events["devices"] = placed
+    if raw_takes:
+        events["devices"] = raw_takes
+        events["device_sync"] = {"t0": t0, "term_width": term_w}
     path = out / "events.json"
     path.write_text(json.dumps(events, indent=2, ensure_ascii=False) + "\n")
+    if raw_takes:
+        composite_devices(out, spec["accent"])
     return path
 
 
@@ -460,27 +476,31 @@ def _regions(panes, work, term_w=W) -> dict:
     return regions
 
 
-def _add_devices(stage_mp4: Path, devices, takes, t0, duration, work, spec) -> list:
-    """Widens the stage to W and lays each phone's recording into the band on the right."""
+def composite_devices(out: Path, accent) -> list:
+    """stage.mp4 from stage-term.mp4 and each phone's recording in devices/: the stage widened to W with
+    the phones in a band on the right, each placed by wall-clock time (device_placement). Run at the end
+    of recording and again by `reel plan`, so changing how phones are laid in needs no new recording."""
     from . import cards
-    term_w, rects = device_rects(len(devices))
-    frame = work / "devices.png"
-    cards.device_frames(frame, [d["name"] for d in devices], rects, W, H)
+    out = Path(out)
+    ev = json.loads((out / "events.json").read_text())
+    takes, t0 = ev["devices"], ev["device_sync"]["t0"]
+    term = out / "stage-term.mp4"
+    duration = _probe_duration(term)
+    _, rects = device_rects(len(takes))
+    work = out / "devices"
+    bg, frame, mask = work / "bg.png", work / "frames.png", work / "screen-mask.png"
+    cards.background(bg, accent, W, H)
+    cards.device_frames(frame, [t["name"] for t in takes], rects, W, H)
     sw, sh = rects[0][2] - rects[0][0], rects[0][3] - rects[0][1]
-    mask = work / "screen-mask.png"
     cards.rounded_mask(mask, sw, sh, round(sw * 0.12))
-    inputs = ["-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(work / "bg.png"),
-              "-i", str(stage_mp4), "-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(frame),
-              "-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(mask)]
-    g = ["[0:v][1:v]overlay=0:0:shortest=1[s0]", "[s0][2:v]overlay=0:0[s1]", "[3:v]format=gray,split=" + str(len(devices))
-         + "".join(f"[m{k}]" for k in range(len(devices)))]
+    still = lambda p: ["-loop", "1", "-framerate", str(RETIME_FPS), "-t", f"{duration:.3f}", "-i", str(p)]
+    inputs = [*still(bg), "-i", str(term), *still(frame), *still(mask)]
+    g = ["[0:v][1:v]overlay=0:0:shortest=1[s0]", "[s0][2:v]overlay=0:0[s1]",
+         f"[3:v]format=gray,split={len(takes)}" + "".join(f"[m{k}]" for k in range(len(takes)))]
     last, n, placed = "s1", 4, []
-    for k, (d, take, rect) in enumerate(zip(devices, takes, rects)):
-        if not take or not Path(take["path"]).exists():
-            placed.append({"name": d["name"], "recorded": False})
-            continue
+    for k, (take, rect) in enumerate(zip(takes, rects)):
         delay, trim = device_placement(take["started"], t0)
-        inputs += ["-i", take["path"]]
+        inputs += ["-i", str(out / take["path"])]
         # recordVideo writes a frame only when the screen changes: make it constant-rate first, or
         # trimming a still opening would pull every later frame early.
         g.append(f"[{n}:v]fps={RETIME_FPS},trim=start={trim:.3f},setpts=PTS-STARTPTS+{delay:.3f}/TB,"
@@ -488,15 +508,12 @@ def _add_devices(stage_mp4: Path, devices, takes, t0, duration, work, spec) -> l
         g.append(f"[d{k}][m{k}]alphamerge[r{k}]")
         g.append(f"[{last}][r{k}]overlay={rect[0]}:{rect[1]}:eof_action=repeat[o{k}]")
         last, n = f"o{k}", n + 1
-        placed.append({"name": d["name"], "recorded": True, "udid": take["udid"], "delay": delay, "trim": trim})
-    wide = work / "stage-wide.mp4"
+        placed.append({"name": take["name"], "delay": delay, "trim": trim})
+    wide = out / "stage-wide.mp4"
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *inputs, "-filter_complex", ";".join(g), "-map", f"[{last}]",
                     "-t", f"{duration:.3f}", "-c:v", "libx264", "-crf", "16", "-preset", "medium",
                     "-pix_fmt", "yuv420p", str(wide)], check=True)
-    shutil.move(str(wide), stage_mp4)
-    missing = [p["name"] for p in placed if not p["recorded"]]
-    if missing:
-        raise RecordError(f"no recording of {', '.join(missing)}: its find command never printed a UDID")
+    shutil.move(str(wide), out / "stage.mp4")
     return placed
 
 

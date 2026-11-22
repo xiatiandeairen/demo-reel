@@ -27,6 +27,7 @@ say = "Install with Homebrew."
 hold = 1.0
 [[step]]
 type = "claude plugin marketplace add xiatiandeairen/agent-quay"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
 wait = "Added marketplace"
 timeout = 60
 say = "Add the Claude Code plugin."

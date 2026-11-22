@@ -26,7 +26,7 @@ description: 录产品演示视频和 GIF：给终端 CLI、iOS 模拟器或真�
 - 完整介绍片（多场景，可选）：要"问题 → 前后对比 → 用法 → 安装"这种一条片子换几种画面的讲法时，写一个总片文件 `film.toml`，用 `[[scene]] spec = "<场景>.toml"` 按顺序列出场景，`max_seconds` 默认 90。每个场景是一份普通分镜（各自写 `[voice]`），能单独 `reel make <场景>.toml` 重录，再 `reel compose film.toml` 重新拼接、不重录其他场景；`reel make film.toml` 依次录全部场景。场景之间淡入淡出。写法参考 `examples/aq/film.toml`。场景类型除了四种录制，还有：
   - `kind = "animation"`：`[animation] html = "<页面>.html"`、`seconds`，页面里用 CSS 动画画问题示意，逐帧渲染，不推镜头不剪；旁白用 `[[step]] at = 秒` 加 `say`。每个动画都要写 `both`（如 `animation: x 1s 2s both`），开始前和结束后才停在首尾帧。
   - `kind = "card"`：`[card] lines = ["Builds run: {a} → {b}"]`，`[card.values]` 里每个值是一条 shell 命令的输出（从录制日志算出来），命令失败或没输出就停止出片；每次 `reel compose film.toml` 都会重画。
-  - 终端场景加 `[[device]]`：`name`（手机下方的标签）和 `find`（每 0.5 秒执行一次、打印出模拟器 UDID 时开始录这台手机）。手机排在终端右侧，开始录之前显示暗屏。手机画面靠 `xcrun simctl io recordVideo` 单独录，不需要窗口。模拟器上的变化（页面加载）在录屏时会慢好几秒：让演示命令等到画面真的变了再返回并打印一行，步骤用 `wait` 等这行（参考 `examples/aq/setup-sims.sh` 的 `sim-show`）。
+  - 终端场景加 `[[device]]`：`name`（手机下方的标签）和 `find`（每 0.5 秒执行一次、打印出模拟器 UDID 时开始录这台手机）。手机排在终端右侧，开始录之前显示暗屏。手机画面靠 `xcrun simctl io recordVideo` 单独录，不需要窗口。让演示命令等到画面真的变了再返回并打印一行，步骤用 `wait` 等这行（参考 `examples/aq/setup-sims.sh` 的 `sim-show`）；这种步骤加 `squeeze = true`，命令运行的中段（页面加载、克隆仓库）即使画面在动也会被剪掉，开头留 0.5 秒、结尾留 1.5 秒。终端原始录像和手机录像都留在状态目录，改了手机的排布或对齐只要 `reel plan` 再 `reel compose`，不用重录。片子里排在后面的终端场景写 `[terminal] open_hold = 0.6`，开场不必再停 1.5 秒。
 - 功能短片：用 `[[clip]]` 标出 `name`、`from`、`to`（步骤编号，从 1 起），从同一次录制剪出 4～15 秒、首尾能循环的短片，适合 README 各功能小节或后续帖子。
 - 打字按每字 45 毫秒上屏（`[terminal] typing_ms` 可调），80 个字符的命令约 3.6 秒；命令尽量短，长路径先放进准备脚本或别名。
 - 结论要看得见：关键数字或结果单独打印一行（如 `build 5.1s → 1.5s`），不要埋在长行中间。

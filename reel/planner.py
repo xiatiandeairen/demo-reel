@@ -65,9 +65,59 @@ def refine(ev: dict, act) -> dict:
     return ev
 
 
+SQUEEZE_KEEP = 0.5  # seconds kept after a squeezed command starts
+SQUEEZE_TAIL = 1.5  # ... and before it ends: a command that waits for the screen notices a change up to
+                    # about a second late, so the change itself must stay in (2026-11-22 dogfood)
+SQUEEZE_MIN = 1.5   # a shorter middle is left alone
+
+
+def squeeze_spans(steps: list, beats: list, commands: list) -> list:
+    """Stage spans to cut for steps marked `squeeze = true` (CASE-C3.3): the middle of the step's typed
+    command while it runs (a page loading, a device booting), even though the screen moves, keeping
+    SQUEEZE_KEEP after it starts, SQUEEZE_TAIL before it ends, and the step's narration."""
+    spans = []
+    for s, b in zip(steps, beats):
+        if not (s.get("squeeze") and s.get("type")):
+            continue
+        pane = s.get("pane")
+        mine = [c for c in commands if c.get("end") is not None and (pane is None or c["pane"] == pane)
+                and b["start"] - 0.5 <= c["start"] <= b["end"] + 0.5]
+        if not mine:
+            continue
+        c = mine[0]
+        lo = round(max(c["start"] + SQUEEZE_KEEP, b["start"] + 0.2 + b.get("narration", 0.0)), 3)
+        hi = round(c["end"] - SQUEEZE_TAIL, 3)
+        if hi - lo >= SQUEEZE_MIN:
+            spans.append((lo, hi))
+    return spans
+
+
+def cut_spans(keep: list, spans: list) -> list:
+    """keep minus spans: [[a, b], ...] in order."""
+    out = []
+    for a, b in keep:
+        parts = [[a, b]]
+        for lo, hi in spans:
+            nxt = []
+            for x, y in parts:
+                if hi <= x or lo >= y:
+                    nxt.append([x, y])
+                    continue
+                if lo > x:
+                    nxt.append([x, lo])
+                if hi < y:
+                    nxt.append([hi, y])
+            parts = nxt
+        out += [p for p in parts if p[1] - p[0] > 0.05]
+    return out
+
+
 def plan(spec: dict, out: Path) -> Path:
     out = Path(out)
     ev = json.loads((out / "events.json").read_text())
+    if ev.get("device_sync"):
+        from .record_terminal import composite_devices
+        composite_devices(out, spec["accent"])  # rebuilt from the kept sources: layout changes need no new recording
     st = ev["stage"]
     regions = ev.get("regions", {})
     rect = lambda name: tuple(regions[name]) if name in regions else None
@@ -103,6 +153,7 @@ def plan(spec: dict, out: Path) -> Path:
     else:
         shots, keep = motion.plan(beats, act, st["duration"], max_zoom,
                                   end_full_at=film_window[1] if film_window else None)
+        keep = cut_spans(keep, squeeze_spans(spec.get("step", []), ev["beats"], ev.get("commands", [])))
 
     # One narration sentence per step: `say`, else `caption`; `keys` adds keycaps after it.
     captions = []

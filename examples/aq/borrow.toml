@@ -40,6 +40,7 @@ hold = 0.5
 [[step]]
 pane = "agent A"
 type = "sim-open A"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
 focus = "full"
 wait = "Agent A's page is up"
 timeout = 120
@@ -54,6 +55,7 @@ hold = 0.5
 [[step]]
 pane = "agent B"
 type = "sim-open B"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
 focus = "full"
 wait = "Agent B's page is up"
 timeout = 120

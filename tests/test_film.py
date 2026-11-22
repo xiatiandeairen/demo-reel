@@ -103,5 +103,33 @@ class DeviceSync(unittest.TestCase):
         self.assertEqual(device_placement(97.5, 100.0), (0.0, 2.5))
 
 
+class Squeeze(unittest.TestCase):
+    # CASE-C3.3: a step marked squeeze loses the middle of its command's run, even while the screen moves.
+    def test_span_is_the_commands_run_minus_both_ends(self):
+        from reel.planner import squeeze_spans
+        steps = [{"pane": "agent A", "type": "sim-open A", "squeeze": True}]
+        beats = [{"start": 10.0, "end": 20.0, "narration": 0.0}]
+        cmds = [{"pane": "agent A", "start": 10.6, "end": 16.0, "cmd": "sim-open A"}]
+        self.assertEqual(squeeze_spans(steps, beats, cmds), [(11.1, 14.5)])
+
+    # CASE-C3.3
+    def test_narration_and_short_runs_are_kept(self):
+        from reel.planner import squeeze_spans
+        steps = [{"pane": "a", "type": "x", "squeeze": True}, {"pane": "a", "type": "y", "squeeze": True},
+                 {"pane": "a", "type": "z"}]
+        beats = [{"start": 0.0, "end": 9.0, "narration": 3.0}, {"start": 9.0, "end": 12.0, "narration": 0.0},
+                 {"start": 12.0, "end": 30.0, "narration": 0.0}]
+        cmds = [{"pane": "a", "start": 0.5, "end": 8.0}, {"pane": "a", "start": 9.5, "end": 11.0},
+                {"pane": "a", "start": 12.5, "end": 29.0}]
+        # step 1 keeps its narration (until 3.2 s); step 2 runs too briefly; step 3 is not marked
+        self.assertEqual(squeeze_spans(steps, beats, cmds), [(3.2, 6.5)])
+
+    # CASE-C3.3
+    def test_spans_come_out_of_keep(self):
+        from reel.planner import cut_spans
+        self.assertEqual(cut_spans([[0.0, 10.0], [12.0, 20.0]], [(3.0, 5.0), (11.0, 14.0)]),
+                         [[0.0, 3.0], [5.0, 10.0], [14.0, 20.0]])
+
+
 if __name__ == "__main__":
     unittest.main()
