@@ -15,6 +15,7 @@ teardown = "teardown.sh"
 init = "source $REEL_WORK/env; cd $REEL_WORK/app"
 font_size = 52
 open_hold = 0.6
+keep_files = ["log"]  # read by the results card as {files:with-agb.toml}/log
 
 [[step]]
 type = "cd ../app-fix"

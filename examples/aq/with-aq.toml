@@ -12,6 +12,7 @@ workdir = "/tmp/aq-demo-with"
 setup = "setup.sh"
 teardown = "teardown.sh"
 open_hold = 0.6  # a later scene of the film: the crossfade already shows the layout
+keep_files = ["runs.log"]  # read by the results card as {files:with-aq.toml}/runs.log
 init = "source $REEL_WORK/env; cd $REEL_WORK/app"
 
 [[pane]]

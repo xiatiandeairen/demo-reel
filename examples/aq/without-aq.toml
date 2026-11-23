@@ -13,6 +13,7 @@ workdir = "/tmp/aq-demo-without"
 setup = "setup-shared.sh"
 teardown = "teardown.sh"
 open_hold = 0.6  # a later scene of the film: the crossfade already shows the layout
+keep_files = ["runs.log"]  # read by the results card as {files:without-aq.toml}/runs.log
 init = "source $REEL_WORK/env; cd $REEL_WORK/app"
 layout = "even-vertical"
 font_size = 52
@@ -50,7 +51,7 @@ type = "sim-open A"
 squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
 focus = "full"
 wait = "Agent A's page is up"
-timeout = 30
+timeout = 90  # typed while this pane's build still runs, so it starts when the build ends
 say = "And they fight over one simulator."
 hold = 2.5
 [[step]]
@@ -59,7 +60,7 @@ type = "sim-open B"
 squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
 focus = "full"
 wait = "Agent B's page is up"
-timeout = 30
+timeout = 90  # typed while this pane's build still runs, so it starts when the build ends
 hold = 3.0
 [[step]]
 focus = "full"

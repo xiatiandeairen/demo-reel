@@ -188,5 +188,72 @@ class BarCard(unittest.TestCase):
             bar_groups([{"title": "t", "items": [{"label": "xcodebuild", "value": "echo fast"}]}], ".")
 
 
+class KeptFiles(unittest.TestCase):
+    # CASE-D3.1: a scene keeps the named files from its workdir in its own state, so a card can read
+    # them after /tmp is gone.
+    def test_files_are_copied_into_state(self):
+        from reel.record_terminal import keep_files
+        with tempfile.TemporaryDirectory() as tmp:
+            work, out = Path(tmp) / "work", Path(tmp) / "out"
+            (work / "app").mkdir(parents=True)
+            out.mkdir()
+            (work / "app" / "runs.log").write_text("1 2\n")
+            keep_files(work, out, ["app/runs.log"])
+            self.assertEqual((out / "files" / "app" / "runs.log").read_text(), "1 2\n")
+            with self.assertRaisesRegex(Exception, "gone.log"):
+                keep_files(work, out, ["gone.log"])
+
+    # CASE-D3.1: a card command names another scene's kept files as {files:<scene>.toml}.
+    def test_card_reads_kept_files(self):
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write(d, "scene.toml", 'title = "s"\nkind = "card"\n[card]\nlines = ["x"]\n')
+            old = os.environ.get("XDG_STATE_HOME")
+            os.environ["XDG_STATE_HOME"] = str(d / "state")
+            try:
+                from reel import paths
+                kept = paths.state_dir(spec.load(d / "scene.toml")) / "files"
+                kept.mkdir(parents=True)
+                (kept / "runs.log").write_text("a\nb\nc\n")
+                vals = record_card.values({"n": "wc -l < {files:scene.toml}/runs.log | tr -d ' '"}, str(d))
+                self.assertEqual(vals, {"n": "3"})
+            finally:
+                if old is None:
+                    os.environ.pop("XDG_STATE_HOME")
+                else:
+                    os.environ["XDG_STATE_HOME"] = old
+
+
+class Rehearsal(unittest.TestCase):
+    # CASE-D2.1: a rehearsal names each problem a recording would hit, before anything is recorded.
+    def test_problems_are_named(self):
+        from reel.rehearse import judge
+        steps = [{"type": "./build.sh"}, {"type": "xcodebuild build"}, {"type": "false", "allow_fail": True},
+                 {"type": "cat log", "wait": "BUILD SUCCEEDED"}]
+        cmds = [{"step": 1, "cmd": "./build.sh", "exit": 2}, {"step": 2, "cmd": "xcodebuild build", "exit": None},
+                {"step": 3, "cmd": "false", "exit": 1}, {"step": 4, "cmd": "cat log", "exit": 0}]
+        problems = judge(steps, cmds, missed={4: "BUILD SUCCEEDED"}, leaks=[("home path", "/Users/someone")])
+        text = "\n".join(problems)
+        self.assertIn("step 1", text)                 # exited non-zero
+        self.assertIn("step 2", text)                 # never finished
+        self.assertNotIn("step 3", text)              # allowed to fail
+        self.assertIn("step 4", text)                 # wait never seen
+        self.assertIn("/Users/someone", text)         # would leak
+        self.assertEqual(judge(steps[:1], [{"step": 1, "cmd": "./build.sh", "exit": 0}], {}, []), [])
+
+    # CASE-D2.2: a rehearsal that passed is reused only while the spec's folder is unchanged.
+    def test_inputs_fingerprint_follows_the_folder(self):
+        from reel.rehearse import fingerprint
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write(d, "a.toml", "x")
+            write(d, "setup.sh", "echo 1")
+            first = fingerprint(d / "a.toml")
+            self.assertEqual(first, fingerprint(d / "a.toml"))
+            write(d, "setup.sh", "echo 2")
+            self.assertNotEqual(first, fingerprint(d / "a.toml"))
+
+
 if __name__ == "__main__":
     unittest.main()

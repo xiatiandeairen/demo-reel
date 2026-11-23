@@ -22,6 +22,7 @@ teardown = "teardown.sh"
 init = "source $REEL_WORK/env; cd $REEL_WORK/app; xcodebuild() { command xcodebuild \"$@\" < /dev/null; }"
 font_size = 52
 open_hold = 0.6
+keep_files = ["log"]  # read by the results card as {files:without-agb.toml}/log
 
 [[step]]
 type = "cd ../app-feature"

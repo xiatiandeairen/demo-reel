@@ -5,8 +5,9 @@ Spec fields for kind = "card":
     [card]
     seconds = 4
     lines = ["Builds run: {without} → {with}"]
-    [card.values]                 # each value is the output of a shell command (run in the spec's folder)
-    without = "wc -l < /tmp/aq-demo-without/runs.log | tr -d ' '"
+    [card.values]                 # each value is the output of a shell command (run in the spec's folder);
+                                  # {files:<scene>.toml} is the files that scene kept (its keep_files)
+    without = "wc -l < {files:without-aq.toml}/app/runs.log | tr -d ' '"
 
 A card can show bar charts instead of (or below) lines: each group compares a few values, bars as
 long as their values with the largest filling the track, growing in one after another.
@@ -23,6 +24,8 @@ shows a made-up or empty figure (CASE-C5.1, CASE-D1.3). Optional [[step]] entrie
 from __future__ import annotations
 
 import json
+import re
+import shlex
 import string
 import subprocess
 from pathlib import Path
@@ -36,9 +39,25 @@ class CardError(RuntimeError):
     pass
 
 
+FILES_REF = re.compile(r"\{files:([^}]+)\}")
+
+
+def _kept_files(cmd: str, cwd: str) -> str:
+    """{files:<scene>.toml} in a command becomes that scene's kept-files directory (CASE-D3.1)."""
+    from . import paths, spec as spec_mod
+
+    def sub(m):
+        scene = (Path(cwd) / m.group(1)).resolve()
+        if not scene.exists():
+            raise CardError(f"card: {m.group(1)} not found")
+        return shlex.quote(str(paths.state_dir(spec_mod.load(scene)) / "files"))
+    return FILES_REF.sub(sub, cmd)
+
+
 def values(commands: dict, cwd: str) -> dict:
     out = {}
     for name, cmd in commands.items():
+        cmd = _kept_files(cmd, cwd)
         r = subprocess.run(["bash", "-c", cmd], cwd=cwd, capture_output=True, text=True)
         if r.returncode != 0:
             raise CardError(f"card value {name}: `{cmd}` failed: {(r.stderr or r.stdout).strip()}")

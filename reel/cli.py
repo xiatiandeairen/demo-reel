@@ -59,6 +59,9 @@ def _record(spec, out):
         from .record_mac import record
     out.mkdir(parents=True, exist_ok=True)
     (out / "spec.txt").write_text(spec["_path"] + "\n")
+    if kind == "terminal" and spec.get("terminal", {}).get("rehearse", True):
+        from .rehearse import rehearse
+        rehearse(spec, out)  # run once unrecorded first: a recording that fails costs minutes
     from .voice import prepare
     prepare(spec, out)  # narration first: its length sets how long each step holds
     return record(spec, out)

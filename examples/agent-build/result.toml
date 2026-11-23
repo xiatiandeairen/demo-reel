@@ -1,5 +1,5 @@
 # Scene 4: what scenes 2 and 3 measured. Times are the timer bars' own figures; lines are counted from
-# each scene's build output (../log in each scene).
+# each scene's build output (../log in each scene, kept in the scene's state).
 title = "agb result"
 kind = "card"
 
@@ -14,5 +14,5 @@ items = [{ label = "xcodebuild", value = { scene = "without-agb.toml", timer = "
 
 [[card.bars]]
 title = "Lines of output"
-items = [{ label = "xcodebuild", value = "wc -l < /tmp/agb-demo-without/log | tr -d ' '" },
-         { label = "agb", value = "wc -l < /tmp/agb-demo-with/log | tr -d ' '" }]
+items = [{ label = "xcodebuild", value = "wc -l < {files:without-agb.toml}/log | tr -d ' '" },
+         { label = "agb", value = "wc -l < {files:with-agb.toml}/log | tr -d ' '" }]

@@ -9,10 +9,13 @@ Spec fields for kind = "terminal":
     init = "cd $REEL_WORK"    # run in every pane before recording (not shown)
     font_size = 40            # 48-54 for one pane, so README-sized frames stay readable
     open_hold = 1.5           # seconds on the whole layout before the first step (0.6 for a film's later scene)
+    keep_files = ["app/runs.log"]  # files (relative to workdir) copied into this scene's state as files/...;
+                              # a card reads them as {files:<this scene>.toml}/app/runs.log
     typing_ms = 45            # per character; long commands cost len x this on screen
     theme = "Catppuccin Mocha"
     prompt = "$ "
     layout = "tiled"          # tmux layout: tiled (grid) or even-vertical (stacked rows)
+    rehearse = true           # run the scene once unrecorded before recording (reel/rehearse.py)
 
     [[pane]]                  # one or more; laid out in a grid, row by row
     name = "agent A"
@@ -158,22 +161,7 @@ def record(spec: dict, out: Path) -> Path:
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(work / "bg.png"), "-vf",
                         f"crop={term_w}:{H}:0:0", str(work / "bg-term.png")], check=True)
 
-    # Every pane's shell logs command start/end with the pane name and exit code.
-    prompt = term.get("prompt", "$ ")
-    rc = work / "reelrc"
-    rc.write_text(f"""
-export BASH_SILENCE_DEPRECATION_WARNING=1 REEL_WORK={shlex.quote(str(work))}
-{term.get("init", "")}
-PS1={shlex.quote(prompt)}
-__reel_log() {{ printf '%s %s %s %s\\n' "$EPOCHREALTIME" "$1" "$REEL_PANE" "$2" >> {shlex.quote(str(log))}; }}
-__reel_armed=0
-__reel_pre() {{ [[ $__reel_armed == 1 ]] || return; __reel_armed=0; __reel_log start "$(printf %q "$BASH_COMMAND")"; }}
-__reel_post() {{ local s=$?; [[ $__reel_started == 1 ]] && __reel_log end "$s"; __reel_started=1; __reel_armed=1; }}
-__reel_started=0
-trap '__reel_pre' DEBUG
-PROMPT_COMMAND=__reel_post
-clear
-""")
+    rc = write_rc(work, term, log)
     mark = work / "mark.sh"
     mark.write_text(f"""#!{bash}
 printf '%s mark - -\\n' "$EPOCHREALTIME" >> {shlex.quote(str(log))}
@@ -233,6 +221,8 @@ fi
             td = subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env,
                                 cwd=spec["_dir"], capture_output=True, text=True)
     marks = [float(l.split()[0]) for l in log.read_text().splitlines() if " mark " in l]
+    if r.returncode == 0 and term.get("keep_files"):
+        keep_files(work, out, term["keep_files"])
     if r.returncode == 0 and td is not None and td.returncode != 0:
         raise RecordError(f"teardown failed: {(td.stderr or td.stdout).strip()}")
     if r.returncode != 0:
@@ -246,8 +236,8 @@ fi
 class _DeviceRecorders:
     """Finds each device's UDID while the demo runs and records its screen from then on."""
 
-    def __init__(self, devices, work, env, bash):
-        self.devices, self.work, self.env, self.bash = devices, work, env, bash
+    def __init__(self, devices, work, env, bash, record=True):
+        self.devices, self.work, self.env, self.bash, self.record = devices, work, env, bash, record
         self.takes = [None] * len(devices)  # {"path", "started", "udid"} once recording
         self.procs, self.done = [], threading.Event()
         self.threads = [threading.Thread(target=self._run, args=(k,), daemon=True) for k in range(len(devices))]
@@ -265,6 +255,9 @@ class _DeviceRecorders:
                 break
             time.sleep(0.5)
         else:
+            return
+        if not self.record:  # rehearsal: the find command ran (it may prepare the device); nothing to film
+            self.takes[k] = {"udid": udid}
             return
         path = self.work / f"device{k}.mp4"
         p = subprocess.Popen(["xcrun", "simctl", "io", udid, "recordVideo", "--codec=h264", "--force", str(path)],
@@ -286,6 +279,39 @@ class _DeviceRecorders:
                 p.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 p.kill()
+
+
+def keep_files(work: Path, out: Path, names: list) -> None:
+    """Copies files the demo wrote (paths relative to the workdir) into <state>/files, where they survive
+    the next recording and a reboot; a results card reads them there (CASE-D3.1)."""
+    for name in names:
+        src = Path(work) / name
+        if not src.exists():
+            raise RecordError(f"keep_files: {name} was not written in {work}")
+        dst = Path(out) / "files" / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, dst)
+
+
+def write_rc(work: Path, term: dict, log: Path) -> Path:
+    """The rc file every pane's shell starts from: the spec's init, the prompt, and a log line per command
+    start and end with the pane's index and exit code (used by recording and by rehearsal)."""
+    prompt = term.get("prompt", "$ ")
+    rc = work / "reelrc"
+    rc.write_text(f"""
+export BASH_SILENCE_DEPRECATION_WARNING=1 REEL_WORK={shlex.quote(str(work))}
+{term.get("init", "")}
+PS1={shlex.quote(prompt)}
+__reel_log() {{ printf '%s %s %s %s\\n' "$EPOCHREALTIME" "$1" "$REEL_PANE" "$2" >> {shlex.quote(str(log))}; }}
+__reel_armed=0
+__reel_pre() {{ [[ $__reel_armed == 1 ]] || return; __reel_armed=0; __reel_log start "$(printf %q "$BASH_COMMAND")"; }}
+__reel_post() {{ local s=$?; [[ $__reel_started == 1 ]] && __reel_log end "$s"; __reel_started=1; __reel_armed=1; }}
+__reel_started=0
+trap '__reel_pre' DEBUG
+PROMPT_COMMAND=__reel_post
+clear
+""")
+    return rc
 
 
 def device_placement(started_wall: float, t0: float) -> tuple:
