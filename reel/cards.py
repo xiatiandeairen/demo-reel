@@ -139,3 +139,82 @@ def rounded_mask(out: Path, w: int, h: int, r: int):
     page = f"""<!doctype html><style>html,body{{margin:0;width:{w}px;height:{h}px;background:#000;overflow:hidden}}
 div{{width:{w}px;height:{h}px;border-radius:{r}px;background:#fff}}</style><div></div>"""
     _shot(page, out, w, h)
+
+
+def timer_panel(out: Path, labels: list, geo: dict, w: int, h: int):
+    """Transparent frame with the timer panel: a dark rounded box, one row per timer with its label and an
+    empty track (the growing bars are drawn over it by the composer)."""
+    rows = []
+    for k, label in enumerate(labels):
+        y = geo["y0"] + k * geo["row_h"]
+        ty = y + (geo["row_h"] - geo["bar_h"]) // 2
+        rows.append(f'<div class="lb" style="left:{geo["x0"] + 24}px;top:{y}px;height:{geo["row_h"]}px">{html.escape(label)}</div>'
+                    f'<div class="tr" style="left:{geo["track_x"]}px;top:{ty}px;width:{geo["track_w"]}px;height:{geo["bar_h"]}px"></div>')
+    pad = 12
+    page = f"""<!doctype html><meta charset="utf-8"><style>
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent;position:relative}}
+.bx{{position:absolute;left:{geo["x0"]}px;top:{geo["y0"] - pad}px;width:{geo["x1"] - geo["x0"]}px;
+height:{len(labels) * geo["row_h"] + 2 * pad}px;border-radius:{int(h * 0.02)}px;background:rgba(12,13,18,.82);
+box-shadow:0 10px 34px rgba(0,0,0,.35)}}
+.lb{{position:absolute;display:flex;align-items:center;font-family:{FONT};font-size:{int(geo["row_h"] * 0.42)}px;
+font-weight:600;color:#fff}}
+.tr{{position:absolute;border-radius:6px;background:rgba(255,255,255,.12)}}
+</style><div class="bx"></div>{"".join(rows)}"""
+    _shot(page, out, w, h)
+
+
+def timer_value(out: Path, text: str, geo: dict, row: int, w: int, h: int):
+    """Transparent frame with one timer's final value, right of its track."""
+    y = geo["y0"] + row * geo["row_h"]
+    left = geo["track_x"] + geo["track_w"] + 16
+    page = f"""<!doctype html><meta charset="utf-8"><style>
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;background:transparent;position:relative}}
+div{{position:absolute;left:{left}px;top:{y}px;height:{geo["row_h"]}px;display:flex;align-items:center;
+font-family:{FONT};font-size:{int(geo["row_h"] * 0.46)}px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}}
+</style><div>{html.escape(text)}</div>"""
+    _shot(page, out, w, h)
+
+
+BAR_COLOURS = ["#e0a030", "#1596b8", "#8f6bff", "#4ade80"]
+
+
+def bar_card(out: Path, lines: list, groups: list, accent: list, w=1920, h=1080) -> list:
+    """A results card with bar charts over the backdrop: per group a title, then one row per item with its
+    label, an empty track and its value. Returns each bar's (x, y, full width, height, colour) for the
+    composer, which grows the bars over the drawn tracks."""
+    css, markup = backdrop(accent, w)
+    label_w, value_w = int(w * 0.16), int(w * 0.12)
+    left, right = int(w * 0.14), int(w * 0.86)
+    track_x, track_w = left + label_w, right - value_w - (left + label_w)
+    row_h, bar_h, title_h, gap = int(h * 0.075), int(h * 0.04), int(h * 0.08), int(h * 0.05)
+    rows = sum(len(g["items"]) for g in groups)
+    total = len(lines) * int(h * 0.09) + len(groups) * (title_h + gap) + rows * row_h
+    y = (h - total) // 2
+    parts, bars, k = [], [], 0
+    for line in lines:
+        parts.append(f'<div class="ln" style="top:{y}px">{html.escape(line)}</div>')
+        y += int(h * 0.09)
+    for g in groups:
+        parts.append(f'<div class="ti" style="left:{left}px;top:{y}px;height:{title_h}px">{html.escape(g["title"])}</div>')
+        y += title_h
+        for j, it in enumerate(g["items"]):
+            by = y + (row_h - bar_h) // 2
+            colour = BAR_COLOURS[j % len(BAR_COLOURS)]  # by position, so one item keeps its colour in every group
+            parts.append(f'<div class="lb" style="left:{left}px;top:{y}px;height:{row_h}px">{html.escape(it["label"])}</div>'
+                         f'<div class="tr" style="left:{track_x}px;top:{by}px;width:{track_w}px;height:{bar_h}px"></div>'
+                         f'<div class="va" style="left:{track_x + track_w + 20}px;top:{y}px;height:{row_h}px">{html.escape(it["text"])}</div>')
+            bars.append((track_x, by, int(track_w * it["share"]), bar_h, "0x" + colour[1:]))
+            y += row_h
+            k += 1
+        y += gap
+    page = f"""<!doctype html><meta charset="utf-8"><style>
+html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;position:relative}}
+{css}
+.ln{{position:absolute;left:0;right:0;text-align:center;font-family:{FONT};font-size:{int(h * 0.06)}px;font-weight:700;color:#fff}}
+.ti{{position:absolute;display:flex;align-items:center;font-family:{FONT};font-size:{int(h * 0.04)}px;font-weight:600;color:rgba(255,255,255,.85)}}
+.lb,.va{{position:absolute;display:flex;align-items:center;font-family:{FONT};font-size:{int(h * 0.042)}px;font-weight:700;color:#fff;
+font-variant-numeric:tabular-nums}}
+.tr{{position:absolute;border-radius:8px;background:rgba(255,255,255,.12)}}
+</style>{markup}{"".join(parts)}"""
+    _shot(page, out, w, h)
+    return bars

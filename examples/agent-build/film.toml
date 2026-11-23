@@ -1,0 +1,17 @@
+# The full agb walkthrough: the problem, the same new-worktree build without and with agb (timer bars
+# on one scale), the measured result, then how to install. Each scene records on its own:
+# reel make <scene>.toml, then reel compose film.toml. The GIF comes from reel.toml.
+title = "agb walkthrough"
+url = "github.com/xiatiandeairen/agent-build"
+max_seconds = 90
+
+[[scene]]
+spec = "problem.toml"
+[[scene]]
+spec = "without-agb.toml"
+[[scene]]
+spec = "with-agb.toml"
+[[scene]]
+spec = "result.toml"
+[[scene]]
+spec = "install.toml"

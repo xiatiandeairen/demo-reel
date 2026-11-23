@@ -131,5 +131,62 @@ class Squeeze(unittest.TestCase):
                          [[0.0, 3.0], [5.0, 10.0], [14.0, 20.0]])
 
 
+class KeepTimeAndTimers(unittest.TestCase):
+    # CASE-D1.1: a step marked keep_time (or timer) keeps its command's whole run, cut nowhere.
+    def test_command_run_is_put_back_into_keep(self):
+        from reel.planner import add_spans, keep_spans
+        steps = [{"pane": "a", "type": "time xcodebuild build", "timer": "xcodebuild"}, {"pane": "a", "type": "ls"}]
+        beats = [{"start": 2.0, "end": 14.0}, {"start": 14.0, "end": 20.0}]
+        cmds = [{"pane": "a", "start": 2.4, "end": 11.0}, {"pane": "a", "start": 14.3, "end": 14.5}]
+        spans = keep_spans(steps, beats, cmds)
+        self.assertEqual(spans, [(2.4, 11.0)])
+        self.assertEqual(add_spans([[0.0, 4.0], [7.0, 8.0], [12.0, 20.0]], spans), [[0.0, 11.0], [12.0, 20.0]])
+
+    # CASE-D1.2: each timer runs over its command, rows in step order, one shared scale.
+    def test_timers_come_from_commands(self):
+        from reel.planner import timer_items
+        steps = [{"pane": "a", "type": "x", "timer": "xcodebuild"}, {"pane": "a", "type": "y", "timer": "agb"}]
+        beats = [{"start": 0.0, "end": 10.0}, {"start": 10.0, "end": 14.0}]
+        cmds = [{"pane": "a", "start": 0.5, "end": 8.9}, {"pane": "a", "start": 10.4, "end": 11.9}]
+        self.assertEqual(timer_items(steps, beats, cmds, 10.0),
+                         [{"label": "xcodebuild", "start": 0.5, "end": 8.9, "seconds": 8.4, "scale": 10.0, "row": 0},
+                          {"label": "agb", "start": 10.4, "end": 11.9, "seconds": 1.5, "scale": 10.0, "row": 1}])
+
+    # CASE-D1.2: the bar grows in real time and stops at its share of the scale.
+    def test_bar_width_follows_time(self):
+        from reel.compose_ffmpeg import timer_width
+        self.assertEqual(timer_width(0.0, start=1.0, seconds=8.4, scale=10.0, track=1000), 0)
+        self.assertEqual(timer_width(5.0, start=1.0, seconds=8.4, scale=10.0, track=1000), 400)
+        self.assertEqual(timer_width(30.0, start=1.0, seconds=8.4, scale=10.0, track=1000), 840)
+        self.assertEqual(timer_width(30.0, start=1.0, seconds=14.0, scale=10.0, track=1000), 1000)
+
+
+    # CASE-D1.2: the previous step's short command inside the window is not taken for the timed one.
+    def test_timer_matches_the_typed_command(self):
+        from reel.planner import timer_items
+        steps = [{"type": "cd ../app-feature"}, {"type": "agb xcodebuild build", "timer": "new worktree"}]
+        beats = [{"start": 13.9, "end": 14.6}, {"start": 14.6, "end": 20.0}]
+        cmds = [{"pane": "main", "start": 14.3, "end": 14.31, "cmd": "cd ../app-feature"},
+                {"pane": "main", "start": 18.2, "end": 19.7, "cmd": "agb\\ xcodebuild\\ build"}]
+        self.assertEqual(timer_items(steps, beats, cmds, 6.0)[0]["seconds"], 1.5)
+
+
+class BarCard(unittest.TestCase):
+    # CASE-D1.3: bars in a group are as long as their values, the largest filling the track.
+    def test_bar_lengths_are_proportional(self):
+        from reel.record_card import bar_groups
+        groups = [{"title": "First build in a new worktree", "unit": "s",
+                   "items": [{"label": "xcodebuild", "value": "echo 8.4"}, {"label": "agb", "value": "echo 1.5"}]}]
+        out = bar_groups(groups, ".")
+        self.assertEqual([round(i["share"], 3) for i in out[0]["items"]], [1.0, 0.179])
+        self.assertEqual([i["text"] for i in out[0]["items"]], ["8.4 s", "1.5 s"])
+
+    # CASE-D1.3: a value that is not a number stops the film.
+    def test_non_numeric_value_is_refused(self):
+        from reel.record_card import CardError, bar_groups
+        with self.assertRaisesRegex(CardError, "xcodebuild"):
+            bar_groups([{"title": "t", "items": [{"label": "xcodebuild", "value": "echo fast"}]}], ".")
+
+
 if __name__ == "__main__":
     unittest.main()

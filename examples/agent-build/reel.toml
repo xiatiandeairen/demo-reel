@@ -1,0 +1,37 @@
+# The agb GIF for agent-build's README: put agb in front of xcodebuild; the first build is cold, then a
+# new worktree of the same project builds in a second or two. Real xcodebuild runs on agent-build's
+# sample app (setup.sh); AGB_REPO and AGB_BIN_DIR come from the environment (see setup.sh).
+title = "agb"
+kind = "terminal"
+timer_scale = 6  # seconds for a full timer bar
+
+[terminal]
+workdir = "/tmp/agb-demo"
+setup = "setup-fresh.sh"
+teardown = "teardown.sh"
+init = "source $REEL_WORK/env; cd $REEL_WORK/app"
+font_size = 52
+
+[[step]]
+type = "agb xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator'"
+wait = "agb: ok"
+timeout = 180
+timer = "first build"
+focus = "full"
+say = "Put agb in front of xcodebuild."
+hold = 1.0
+
+[[step]]
+type = "cd ../app-feature"
+focus = "full"
+say = "Then switch to a new worktree."
+hold = 0.3
+
+[[step]]
+type = "agb xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator'"
+wait = 'agb: ok[\s\S]*agb: ok'
+timeout = 120
+timer = "new worktree"
+focus = "full"
+say = "It builds in seconds, from the warm slot."
+hold = 2.0

@@ -71,6 +71,54 @@ SQUEEZE_TAIL = 1.5  # ... and before it ends: a command that waits for the scree
 SQUEEZE_MIN = 1.5   # a shorter middle is left alone
 
 
+def _step_command(step: dict, beat: dict, commands: list) -> dict | None:
+    """The finished command a typed step started: in its pane, entered during the step, and starting with
+    the same word as what the step typed (the previous step's short command can fall inside the window)."""
+    pane = step.get("pane")
+    mine = [c for c in commands if c.get("end") is not None and (pane is None or c["pane"] == pane)
+            and beat["start"] - 0.5 <= c["start"] <= beat["end"] + 0.5]
+    word = (step.get("type") or "").split()[:1]
+    same = [c for c in mine if word and c.get("cmd", "").replace("\\ ", " ").split()[:1] == word]
+    return (same or mine or [None])[0]
+
+
+def keep_spans(steps: list, beats: list, commands: list) -> list:
+    """Stage spans that must play uncut (CASE-D1.1): the whole run of commands in steps marked
+    `keep_time = true` or `timer`, so a comparison of durations is shown in real time."""
+    spans = []
+    for s, b in zip(steps, beats):
+        if s.get("type") and (s.get("keep_time") or s.get("timer")):
+            c = _step_command(s, b, commands)
+            if c:
+                spans.append((round(c["start"], 3), round(c["end"], 3)))
+    return spans
+
+
+def add_spans(keep: list, spans: list) -> list:
+    """keep with spans added back, merged and in order."""
+    parts = sorted([list(k) for k in keep] + [list(sp) for sp in spans])
+    out = []
+    for a, b in parts:
+        if out and a <= out[-1][1] + 1e-6:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def timer_items(steps: list, beats: list, commands: list, scale: float) -> list:
+    """One timer bar per step with `timer = "<label>"`, over its command's run (CASE-D1.2). Every bar
+    shares `scale` seconds for its full width, so bars in different scenes compare directly."""
+    items = []
+    for s, b in zip(steps, beats):
+        if s.get("type") and s.get("timer"):
+            c = _step_command(s, b, commands)
+            if c:
+                items.append({"label": str(s["timer"]), "start": round(c["start"], 3), "end": round(c["end"], 3),
+                              "seconds": round(c["end"] - c["start"], 1), "scale": float(scale), "row": len(items)})
+    return items
+
+
 def squeeze_spans(steps: list, beats: list, commands: list) -> list:
     """Stage spans to cut for steps marked `squeeze = true` (CASE-C3.3): the middle of the step's typed
     command while it runs (a page loading, a device booting), even though the screen moves, keeping
@@ -79,12 +127,9 @@ def squeeze_spans(steps: list, beats: list, commands: list) -> list:
     for s, b in zip(steps, beats):
         if not (s.get("squeeze") and s.get("type")):
             continue
-        pane = s.get("pane")
-        mine = [c for c in commands if c.get("end") is not None and (pane is None or c["pane"] == pane)
-                and b["start"] - 0.5 <= c["start"] <= b["end"] + 0.5]
-        if not mine:
+        c = _step_command(s, b, commands)
+        if not c:
             continue
-        c = mine[0]
         lo = round(max(c["start"] + SQUEEZE_KEEP, b["start"] + 0.2 + b.get("narration", 0.0)), 3)
         hi = round(c["end"] - SQUEEZE_TAIL, 3)
         if hi - lo >= SQUEEZE_MIN:
@@ -153,7 +198,9 @@ def plan(spec: dict, out: Path) -> Path:
     else:
         shots, keep = motion.plan(beats, act, st["duration"], max_zoom,
                                   end_full_at=film_window[1] if film_window else None)
-        keep = cut_spans(keep, squeeze_spans(spec.get("step", []), ev["beats"], ev.get("commands", [])))
+        steps, cmds = spec.get("step", []), ev.get("commands", [])
+        keep = cut_spans(keep, squeeze_spans(steps, ev["beats"], cmds))
+        keep = add_spans(keep, keep_spans(steps, ev["beats"], cmds))
 
     # One narration sentence per step: `say`, else `caption`; `keys` adds keycaps after it.
     captions = []
@@ -176,6 +223,9 @@ def plan(spec: dict, out: Path) -> Path:
         "shots": shots,
         "captions": captions,
     }
+    timers = timer_items(spec.get("step", []), ev["beats"], ev.get("commands", []), float(spec.get("timer_scale", 10)))
+    if timers:
+        data["timers"] = timers
     # Narration: each step's synthesised sentence, starting with its caption (see voice.py).
     narration = []
     for i, b in enumerate(ev["beats"], 1):

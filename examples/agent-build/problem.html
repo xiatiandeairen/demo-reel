@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Scene 1 of the agb walkthrough: three worktrees of one app, and each one's build starts again from
+     0%. Rendered frame by frame by reel (record_animation.py); plain CSS, 6 s in all. -->
+<meta charset="utf-8">
+<style>
+  @property --pct { syntax: '<integer>'; inherits: false; initial-value: 0; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #0b0d14;
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif; color: #fff; }
+  .bd { position: absolute; inset: -20%; filter: blur(80px); opacity: .9; background:
+    radial-gradient(40% 50% at 18% 22%, #7b3fd1 0%, transparent 70%),
+    radial-gradient(45% 55% at 85% 30%, #2a2f8f 0%, transparent 72%),
+    radial-gradient(55% 60% at 60% 95%, #7b3fd1aa 0%, transparent 70%); }
+  .rows { position: absolute; left: 330px; top: 270px; width: 1260px; }
+  .row { display: flex; align-items: center; gap: 36px; height: 150px;
+    animation: enter .6s cubic-bezier(.2, .8, .2, 1) both; }
+  .row:nth-child(2) { animation-delay: .8s; } .row:nth-child(3) { animation-delay: 1.6s; }
+  .chip { width: 300px; height: 84px; border-radius: 20px; background: #1b1f2c; display: flex; align-items: center;
+    gap: 18px; padding-left: 26px; box-sizing: border-box; font-size: 38px; font-weight: 700; }
+  .chip svg { width: 34px; height: 34px; }
+  .track { position: relative; flex: 1; height: 34px; border-radius: 17px; background: rgba(255,255,255,.12); overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 17px; background: #e0a030;
+    animation: grow 3.6s linear both; }
+  .row:nth-child(1) .fill, .row:nth-child(1) .pct { animation-delay: .5s; }
+  .row:nth-child(2) .fill, .row:nth-child(2) .pct { animation-delay: 1.3s; }
+  .row:nth-child(3) .fill, .row:nth-child(3) .pct { animation-delay: 2.1s; }
+  .pct { width: 150px; font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right;
+    animation: count 3.6s linear both; counter-reset: p var(--pct); }
+  .pct::after { content: counter(p) "%"; }
+  @keyframes enter { from { opacity: 0; transform: translateX(-60px); } to { opacity: 1; transform: none; } }
+  @keyframes grow { from { width: 0; } to { width: 100%; } }
+  @keyframes count { from { --pct: 0; } to { --pct: 100; } }
+</style>
+<div class="bd"></div>
+<div class="rows">
+  <div class="row"><div class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 4-12 6"/></svg>main</div><div class="track"><div class="fill"></div></div><div class="pct"></div></div>
+  <div class="row"><div class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 4-12 6"/></svg>feature</div><div class="track"><div class="fill"></div></div><div class="pct"></div></div>
+  <div class="row"><div class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 4-12 6"/></svg>fix</div><div class="track"><div class="fill"></div></div><div class="pct"></div></div>
+</div>

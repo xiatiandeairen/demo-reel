@@ -32,6 +32,9 @@ Spec fields for kind = "terminal":
                               # counts too: for a second "ok" write 'ok[\s\S]*ok') ...
     timeout = 30              # ... within this many seconds, else the recording fails
     allow_fail = false        # a typed command exiting non-zero fails the recording
+    keep_time = false         # play this command's whole run uncut, for comparing durations
+    timer = "xcodebuild"      # draw a timer bar with this label over the command's run (implies keep_time);
+                              # every bar uses the spec's top-level timer_scale (seconds for a full bar, 10)
     squeeze = false           # cut the middle of this command's run even while the screen moves (a page
                               # loading, a clone): keeps 0.5 s after the start, 1.5 s before the end, and the narration
     focus = "agent A"         # pane name(s) to frame, "full", or omit to follow the change

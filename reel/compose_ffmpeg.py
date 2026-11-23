@@ -20,6 +20,30 @@ LOOP_HOLD = 0.1
 CAPTION_FADE = 0.25
 
 
+# Timer bars (CASE-D1.2): rows in a dark panel above the captions, as shares of the output frame.
+TIMER_X0, TIMER_X1 = 0.18, 0.82
+TIMER_ROW_H = 0.062
+TIMER_BOTTOM = 0.17          # the panel's bottom edge, above the caption
+TIMER_LABEL_W, TIMER_VALUE_W = 0.13, 0.09
+TIMER_COLOURS = ["0xe0a030", "0x1596b8", "0x8f6bff"]
+
+
+def timer_width(t: float, start: float, seconds: float, scale: float, track: int) -> int:
+    """Pixels of a timer bar at film time t: grows with real time, stops at seconds / scale of the track."""
+    return int(track * min(min(1.0, seconds / scale), max(0.0, t - start) / scale))
+
+
+def _timer_geometry(ow: int, oh: int, rows: int) -> dict:
+    x0, x1 = int(ow * TIMER_X0), int(ow * TIMER_X1)
+    row_h = int(oh * TIMER_ROW_H)
+    y1 = int(oh * (1 - TIMER_BOTTOM))
+    y0 = y1 - rows * row_h
+    track_x = x0 + int(ow * TIMER_LABEL_W)
+    track_w = x1 - int(ow * TIMER_VALUE_W) - track_x
+    return {"x0": x0, "x1": x1, "y0": y0, "row_h": row_h, "track_x": track_x, "track_w": track_w,
+            "bar_h": int(row_h * 0.42)}
+
+
 def _ease(a, b, t0, t1, log=False):
     s = f"(((T-{t0})/{t1 - t0}))"
     s = f"({s}*{s}*(3-2*{s}))"
@@ -113,6 +137,36 @@ def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bo
                      f"fade=t=out:st={e - CAPTION_FADE:.3f}:d={CAPTION_FADE}:alpha=1[c{i}]")
             g.append(f"[{last}][c{i}]overlay=0:0:enable='between(t,{s:.3f},{e:.3f})',format=yuv420p[o{i}]")
             last, n = f"o{i}", n + 1
+
+        timers = tl.get("timers", [])
+        if timers:
+            geo = _timer_geometry(ow, oh, len(timers))
+            panel = tmp / "timers.png"
+            cards.timer_panel(panel, [tm["label"] for tm in timers], geo, ow, oh)
+            starts = [timeline.output_time(tl["keep"], tm["start"]) for tm in timers]
+            shown = min((st for st in starts if st is not None), default=0.0)
+            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{body:.3f}", "-i", str(panel)]
+            g.append(f"[{n}:v]format=rgba,fade=t=in:st={shown:.3f}:d=0.3:alpha=1[tp]")
+            g.append(f"[{last}][tp]overlay=0:0:enable='gte(t,{shown:.3f})',format=yuv420p[tpo]")
+            last, n = "tpo", n + 1
+            for k, (tm, st) in enumerate(zip(timers, starts)):
+                if st is None:
+                    continue
+                cap = min(1.0, tm["seconds"] / tm["scale"])
+                y = geo["y0"] + k * geo["row_h"] + (geo["row_h"] - geo["bar_h"]) // 2
+                colour = TIMER_COLOURS[k % len(TIMER_COLOURS)]
+                inputs += ["-f", "lavfi", "-i", f"color=c={colour}:s={geo['track_w']}x{geo['bar_h']}:d={body:.3f}:r={fps}"]
+                g.append(f"[{n}:v]scale=w='max(2,{geo['track_w']}*min({cap:.4f},max(0,t-{st:.3f})/{tm['scale']}))'"
+                         f":h={geo['bar_h']}:eval=frame[tf{k}]")
+                g.append(f"[{last}][tf{k}]overlay={geo['track_x']}:{y}:eval=frame:enable='gte(t,{st:.3f})',format=yuv420p[tb{k}]")
+                last, n = f"tb{k}", n + 1
+                done = st + tm["seconds"]
+                val = tmp / f"timer{k}.png"
+                cards.timer_value(val, f"{tm['seconds']:.1f} s", geo, k, ow, oh)
+                inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{body:.3f}", "-i", str(val)]
+                g.append(f"[{n}:v]format=rgba,fade=t=in:st={done:.3f}:d=0.25:alpha=1[tv{k}]")
+                g.append(f"[{last}][tv{k}]overlay=0:0:enable='gte(t,{done:.3f})',format=yuv420p[tvo{k}]")
+                last, n = f"tvo{k}", n + 1
 
         offset = 0.0
         if tl.get("intro"):
