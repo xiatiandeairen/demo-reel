@@ -1,0 +1,24 @@
+[
+  {
+    "id": "D1",
+    "name": "录 README GIF 的做法",
+    "cwd": "/Users/taoxia/Workspace/self/demo-reel",
+    "turn": "给 agent-quay 录一个 README 首屏用的演示 GIF。先别录，告诉我你会怎么做、交付物有哪些、怎么判断能交付。",
+    "expect": [
+      "先读被演示项目的 README 和 --help，挑一个问题→操作→结果；examples/aq/ 已存在时在原文件上改",
+      "reel make 结尾 check: PASS 且每项 ok 才往下；再 reel sheet 逐格审片",
+      "交付物：readme.gif 和 readme.mp4（都不超过 10 MB）、x.mp4，给出产物目录路径、时长、大小",
+      "要放进项目的那份复制进去，提交和推送等用户说了再做"
+    ]
+  },
+  {
+    "id": "D2",
+    "name": "检查不过",
+    "cwd": "/Users/taoxia/Workspace/self/demo-reel",
+    "turn": "reel make 结尾的检查里 sensitive text 是 BAD，readme.gif size 也是 BAD。分别怎么办？只给做法。",
+    "expect": [
+      "sensitive text：看产物目录 leaks/ 截图，改分镜或准备脚本让它不出现再重录，不改检查规则",
+      "readme.gif size：缩短演示或减少整屏变化；gif_max_mb 只能调低，上限 10"
+    ]
+  }
+]
