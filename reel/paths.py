@@ -7,8 +7,8 @@
     $XDG_CACHE_HOME/demo-reel/          voice and transcription environment, voice clips, models, helpers
     $XDG_CONFIG_HOME/demo-reel/         private.txt (your own sensitive-text patterns)
 
-Defaults: ~/.local/state, ~/.local/share, ~/.cache, ~/.config. <reel> is the film's title plus a short
-hash of the spec's path, so two projects with a film of the same name never share a directory.
+Defaults: ~/.local/state, ~/.local/share, ~/.cache, ~/.config. <reel> is the spec's folder and file name plus
+a short hash of its path (aq-install-6ed752), so two specs never share a directory.
 """
 from __future__ import annotations
 
@@ -37,9 +37,16 @@ def config_root() -> Path:
     return _home("XDG_CONFIG_HOME", ".config")
 
 
+def _slug(s: str) -> str:
+    return "".join(c if c.isalnum() else "-" for c in s.lower()).strip("-") or "demo"
+
+
 def reel_name(spec: dict) -> str:
-    slug = "".join(c if c.isalnum() else "-" for c in spec["title"].lower()).strip("-") or "demo"
-    return f"{slug}-{hashlib.sha1(spec['_path'].encode()).hexdigest()[:6]}"
+    """<folder>-<file>-<hash of the spec's path>, e.g. aq-install-6ed752: readable at a glance and
+    distinct per spec. The title is only what cards show (a scene titled "aq" for its outro card would
+    otherwise share a readable name with the main film)."""
+    p = Path(spec["_path"])
+    return f"{_slug(p.parent.name)}-{_slug(p.stem)}-{hashlib.sha1(spec['_path'].encode()).hexdigest()[:6]}"
 
 
 def state_dir(spec: dict) -> Path:
@@ -49,3 +56,23 @@ def state_dir(spec: dict) -> Path:
 def deliverables(state: Path) -> Path:
     """The deliverables directory that belongs to a reel's state directory."""
     return data_root() / Path(state).name
+
+
+def orphans(state: Path | None = None, data: Path | None = None) -> list:
+    """State and output directories whose spec no longer exists (or never recorded which spec made them),
+    and output directories with no state directory (CASE-D6.1). `reel gc` lists them; `reel gc --yes`
+    deletes them."""
+    state, data = Path(state or state_root()), Path(data or data_root())
+    gone = []
+    for st in sorted(state.iterdir()) if state.exists() else []:
+        if not st.is_dir() or st.name.startswith("_"):
+            continue
+        spec_txt = st / "spec.txt"
+        if not spec_txt.exists() or not Path(spec_txt.read_text().strip()).exists():
+            gone.append(st)
+            if (data / st.name).exists():
+                gone.append(data / st.name)
+    for dd in sorted(data.iterdir()) if data.exists() else []:
+        if dd.is_dir() and not (state / dd.name).exists():
+            gone.append(dd)
+    return gone

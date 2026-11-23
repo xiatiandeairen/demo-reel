@@ -242,17 +242,53 @@ class Rehearsal(unittest.TestCase):
         self.assertIn("/Users/someone", text)         # would leak
         self.assertEqual(judge(steps[:1], [{"step": 1, "cmd": "./build.sh", "exit": 0}], {}, []), [])
 
-    # CASE-D2.2: a rehearsal that passed is reused only while the spec's folder is unchanged.
-    def test_inputs_fingerprint_follows_the_folder(self):
+    # CASE-D2.2: a scene's fingerprint covers its spec and every file it names, followed through scripts
+    # (setup-shared.sh -> setup-sims.sh -> setup.sh), and nothing else in the folder.
+    def test_fingerprint_follows_what_the_scene_uses(self):
         from reel.rehearse import fingerprint
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
-            write(d, "a.toml", "x")
+            write(d, "a.toml", 'setup = "setup-shared.sh"')
+            write(d, "setup-shared.sh", 'exec bash setup-sims.sh "$1" shared')
+            write(d, "setup-sims.sh", 'bash "$here/setup.sh" "$demo"')
             write(d, "setup.sh", "echo 1")
+            write(d, "other.toml", "y")
             first = fingerprint(d / "a.toml")
+            write(d, "other.toml", "z")                     # another scene's file
             self.assertEqual(first, fingerprint(d / "a.toml"))
-            write(d, "setup.sh", "echo 2")
+            write(d, "setup.sh", "echo 2")                  # two scripts down
             self.assertNotEqual(first, fingerprint(d / "a.toml"))
+
+
+class SkipUnchanged(unittest.TestCase):
+    # CASE-D5.1: a film reuses a scene's recording while its fingerprint is the one it was recorded with.
+    def test_scene_is_reused_only_when_unchanged(self):
+        from reel.film import up_to_date
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self.assertFalse(up_to_date(out, "abc"))         # never recorded
+            (out / "scene.mp4").write_bytes(b"x")
+            (out / "recorded.json").write_text('{"fingerprint": "abc"}')
+            self.assertTrue(up_to_date(out, "abc"))
+            self.assertFalse(up_to_date(out, "def"))         # something it uses changed
+
+
+class GarbageCollect(unittest.TestCase):
+    # CASE-D6.1: reel gc names state and output directories whose spec is gone, and only those.
+    def test_orphans_are_the_ones_without_a_spec(self):
+        from reel.paths import orphans
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            state, data = d / "state", d / "data"
+            write(d, "kept.toml", "x")
+            for name, spec_txt in (("kept-1", str(d / "kept.toml")), ("gone-2", str(d / "gone.toml")), ("bare-3", None)):
+                (state / name).mkdir(parents=True)
+                (data / name).mkdir(parents=True)
+                if spec_txt:
+                    (state / name / "spec.txt").write_text(spec_txt + "\n")
+            (data / "lonely-4").mkdir()
+            self.assertEqual(sorted(p.name for p in orphans(state, data)),
+                             ["bare-3", "bare-3", "gone-2", "gone-2", "lonely-4"])
 
 
 if __name__ == "__main__":

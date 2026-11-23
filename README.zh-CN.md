@@ -48,7 +48,7 @@ ln -s ~/demo-reel/skill ~/.claude/skills/demo-reel   # 给 Claude Code 用
 
 ## 文件放在哪
 
-`reel.toml` 旁边不会生成任何文件。最终产物在 `$XDG_DATA_HOME/demo-reel/<片名>-<短哈希>/`（默认 `~/.local/share/...`，`reel make` 结束时会打印），录屏和时间线在 `$XDG_STATE_HOME/demo-reel/<同名>/`（默认 `~/.local/state/...`），所以 `reel plan`、`reel compose` 不用重录就能重新出片。配音和语音识别用的环境与模型在 `$XDG_CACHE_HOME/demo-reel/`。
+`reel.toml` 旁边不会生成任何文件。最终产物在 `$XDG_DATA_HOME/demo-reel/<文件夹>-<文件名>-<短哈希>/`（默认 `~/.local/share/...`，`reel make` 结束时会打印），录屏和时间线在 `$XDG_STATE_HOME/demo-reel/<同名>/`（默认 `~/.local/state/...`），所以 `reel plan`、`reel compose` 不用重录就能重新出片。配音和语音识别用的环境与模型在 `$XDG_CACHE_HOME/demo-reel/`。`reel gc` 会列出已删除的分镜留下的目录。
 
 ## 依赖
 

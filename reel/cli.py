@@ -10,6 +10,7 @@
     reel sheet <DIR>                      contact sheet over the whole x.mp4, for review
     reel narrate <DIR> [--camera 0] [--mic 0]   talk over the film: adds your camera, voice, captions
     reel test [--integration]             the case suite
+    reel gc [--yes]                       list state and outputs whose spec is gone; --yes deletes them
 
 Nothing is written next to reel.toml: state goes to $XDG_STATE_HOME/demo-reel/<reel>/, deliverables to
 $XDG_DATA_HOME/demo-reel/<reel>/ (see reel/paths.py). <DIR> may be either that state directory or reel.toml.
@@ -28,6 +29,28 @@ ROOT = Path(__file__).resolve().parent.parent
 def _out(spec: dict, out: str | None) -> Path:
     from . import paths
     return Path(out) if out else paths.state_dir(spec)
+
+
+def _make_film_scene(path: str) -> None:
+    """A film's scene: recorded again only when something it uses changed (REEL_RERECORD=always forces it);
+    cards are drawn on every compose anyway."""
+    import os
+    from .film import up_to_date
+    from .rehearse import fingerprint
+    sc = spec_mod_load(path)
+    out = paths_state(sc)
+    fp = fingerprint(Path(path))
+    if sc["kind"] != "card" and os.environ.get("REEL_RERECORD") != "always" and up_to_date(out, fp):
+        print(f"  unchanged since its last recording: reused ({out.name})")
+        return
+    (out / "recorded.json").unlink(missing_ok=True)
+    _make_scene(sc, out)
+    (out / "recorded.json").write_text(json.dumps({"fingerprint": fp}) + "\n")
+
+
+def spec_mod_load(path):
+    from . import spec as spec_mod
+    return spec_mod.load(path)
 
 
 def paths_state(spec: dict) -> Path:
@@ -144,6 +167,7 @@ def main(argv=None):
     s.add_argument("dir")
     s.add_argument("--camera", default="0")
     s.add_argument("--mic", default="0")
+    sub.add_parser("gc").add_argument("--yes", action="store_true")
     s = sub.add_parser("test")
     s.add_argument("--integration", action="store_true")
     a = p.parse_args(argv)
@@ -152,6 +176,21 @@ def main(argv=None):
     if a.cmd == "test":
         env_flag = ["env", "REEL_INTEGRATION=1"] if a.integration else []
         return subprocess.call([*env_flag, sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], cwd=ROOT)
+    if a.cmd == "gc":
+        import shutil
+        from . import paths
+        gone = paths.orphans()
+        size = lambda p: sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        for p in gone:
+            print(f"{size(p) / 1e6:8.1f} MB  {p}")
+        print(f"{len(gone)} directories, {sum(map(size, gone)) / 1e6:.1f} MB" if gone else "nothing to remove")
+        if gone and a.yes:
+            for p in gone:
+                shutil.rmtree(p)
+            print("removed")
+        elif gone:
+            print("run reel gc --yes to remove them")
+        return 0
     if a.cmd == "narrate":
         from .narrate import narrate
         narrate(_resolve(a.dir), a.camera, a.mic)
@@ -181,7 +220,7 @@ def main(argv=None):
                 print("a film has no recording of its own: reel make <film.toml>, or record a scene's own spec")
                 return 2
             from .film import make_all
-            make_all(spec["_scenes"], lambda p: _make_scene(sc := spec_mod.load(p), paths_state(sc)))
+            make_all(spec["_scenes"], _make_film_scene)
             return _finish(out, spec)
         if a.cmd in ("make", "record"):
             _record(spec, out)
@@ -189,7 +228,13 @@ def main(argv=None):
         if a.cmd in ("make", "plan"):
             from .planner import plan
             print(f"planned {plan(spec, out)}")
-        return _finish(out, spec) if a.cmd == "make" else 0
+        if a.cmd != "make":
+            return 0
+        code = _finish(out, spec)
+        if (out / "scene.mp4").exists():  # composed: a film may reuse this recording while its inputs stay the same
+            from .rehearse import fingerprint
+            (out / "recorded.json").write_text(json.dumps({"fingerprint": fingerprint(Path(spec["_path"]))}) + "\n")
+        return code
     out = _resolve(a.dir)
     spec_file = out / "spec.txt"
     if a.dir.endswith(".toml"):

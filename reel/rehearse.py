@@ -5,7 +5,7 @@ and holds, device `find` commands polled), but types instantly and reads tmux's 
 current where the recorder's terminal can stall. Afterwards it names every problem a recording would hit:
 a typed command that exits non-zero, one that never finishes, a `wait` that never shows up, and sensitive
 text anywhere in the panes' output (home paths, user name, tokens, private patterns). A rehearsal that
-passed is reused while the spec's folder is unchanged (CASE-D2.2); set REEL_REHEARSE=always to run it
+passed is reused while nothing the scene uses has changed (fingerprint, CASE-D2.2); set REEL_REHEARSE=always to run it
 anyway, or `[terminal] rehearse = false` to skip it for a scene.
 
 Recording a scene that fails takes minutes; a rehearsal takes the demo's own run time (2026-11-23
@@ -29,12 +29,24 @@ POLL = 0.25
 
 
 def fingerprint(spec_path: Path) -> str:
-    """Hash of the spec's folder (spec, scripts, pages): a rehearsal stays valid while none of it changes."""
+    """Hash of everything a scene uses: its spec and each file in its folder that it names, followed through
+    the scripts it names (setup-shared.sh -> setup-sims.sh -> setup.sh). Editing another scene's files
+    leaves it alone (CASE-D2.2). Tools outside the folder (the demoed binary) are not covered: set
+    REEL_REHEARSE=always or REEL_RERECORD=always after changing them."""
+    spec_path = Path(spec_path).resolve()
+    folder = spec_path.parent
+    siblings = {f.name: f for f in folder.iterdir() if f.is_file() and f != spec_path}
+    used, todo = {spec_path}, [spec_path]
+    while todo:
+        text = todo.pop().read_text(errors="replace")
+        for name, f in siblings.items():
+            if f not in used and re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w.-])", text):
+                used.add(f)
+                todo.append(f)
     h = hashlib.sha1()
-    for f in sorted(Path(spec_path).resolve().parent.iterdir()):
-        if f.is_file():
-            h.update(f.name.encode())
-            h.update(f.read_bytes())
+    for f in sorted(used):
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
     return h.hexdigest()[:16]
 
 
@@ -74,7 +86,7 @@ def rehearse(spec: dict, out: Path) -> dict:
     if os.environ.get("REEL_REHEARSE") != "always" and prev.exists():
         old = json.loads(prev.read_text())
         if old.get("fingerprint") == fp and old.get("ok"):
-            print("rehearsal: reused (nothing in the spec's folder changed since it passed)")
+            print("rehearsal: reused (nothing this scene uses changed since it passed)")
             return old
     bash = _bash()
     panes = spec.get("pane") or [{"name": "main"}]

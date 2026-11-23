@@ -74,7 +74,7 @@ Rendering is plain ffmpeg; title cards and captions are drawn by headless Chrome
 
 ## Where files go
 
-Nothing is written next to `reel.toml`. Deliverables go to `$XDG_DATA_HOME/demo-reel/<title>-<hash>/` (default `~/.local/share/...`; `reel make` prints it), recordings and timelines to `$XDG_STATE_HOME/demo-reel/<title>-<hash>/` (default `~/.local/state/...`), so `reel plan` and `reel compose` can redo a film without recording again. Voice and transcription tools and models live in `$XDG_CACHE_HOME/demo-reel/`.
+Nothing is written next to `reel.toml`. Deliverables go to `$XDG_DATA_HOME/demo-reel/<folder>-<file>-<hash>/` (default `~/.local/share/...`; `reel make` prints it), recordings and timelines to `$XDG_STATE_HOME/demo-reel/<folder>-<file>-<hash>/` (default `~/.local/state/...`), so `reel plan` and `reel compose` can redo a film without recording again. `reel gc` lists what a deleted spec left behind. Voice and transcription tools and models live in `$XDG_CACHE_HOME/demo-reel/`.
 
 ## Requirements
 

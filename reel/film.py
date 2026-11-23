@@ -34,6 +34,12 @@ def shift_items(per_scene: list, starts: list) -> list:
     return [(wav, round(s + at, 3)) for items, s in zip(per_scene, starts) for wav, at in items]
 
 
+def up_to_date(out: Path, fp: str) -> bool:
+    """Whether a scene's last recording was made from the inputs with fingerprint fp (CASE-D5.1)."""
+    rec = Path(out) / "recorded.json"
+    return (Path(out) / "scene.mp4").exists() and rec.exists() and json.loads(rec.read_text()).get("fingerprint") == fp
+
+
 def make_all(scenes: list, make) -> None:
     """Makes the scenes in order; a failure names its scene and leaves finished scenes as they are (CASE-C8)."""
     for k, p in enumerate(scenes, 1):

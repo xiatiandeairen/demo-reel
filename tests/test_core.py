@@ -192,7 +192,9 @@ class Storage(unittest.TestCase):
                 b = {"title": "aq", "_path": "/repo-two/docs/demo/reel.toml"}
                 sa, sb = paths.state_dir(a), paths.state_dir(b)
                 self.assertNotEqual(sa, sb)  # same title in two projects: two directories
-                self.assertTrue(str(sa).startswith(f"{home}/state/demo-reel/aq-"))
+                self.assertTrue(str(sa).startswith(f"{home}/state/demo-reel/demo-reel-"))  # <folder>-<file>-<hash>
+                inst = {"title": "aq", "_path": "/repo-one/examples/aq/install.toml"}  # the title is the outro's text
+                self.assertTrue(paths.state_dir(inst).name.startswith("aq-install-"))
                 self.assertEqual(paths.deliverables(sa), Path(f"{home}/data/demo-reel") / sa.name)
                 self.assertNotIn("/repo-one", str(sa))
             finally:

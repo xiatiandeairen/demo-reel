@@ -42,7 +42,7 @@ description: 录产品演示视频和 GIF：终端 CLI、iOS 模拟器或真机 
 - 画面里没有家目录路径、用户名、token、API key 和 `~/.config/demo-reel/private.txt` 里的私有规则；检查每半秒做一次文字识别，命中就不交付并附截图。
 - 真机录制：状态栏、通知、账号名会原样录进去，选不含个人信息的 App 和页面。
 
-**交付物**（在 `$XDG_DATA_HOME/demo-reel/<片名>-<短哈希>/`，默认 `~/.local/share/...`）
+**交付物**（在 `$XDG_DATA_HOME/demo-reel/<文件夹>-<文件名>-<短哈希>/`，如 `aq-install-6ed752`，默认 `~/.local/share/...`）
 - `x.mp4`：X 时间线用，1920×1080 H.264。
 - `readme.mp4` 和 `readme.gif`：GitHub README 用，都不超过 10 MB；GIF 超限时自动降尺寸和帧率，仍超就报错并列出各档大小。
 - `clips/<名字>.mp4` 和 `.gif`：功能短片；`x-presenter.mp4`：真人出镜版。
@@ -50,7 +50,7 @@ description: 录产品演示视频和 GIF：终端 CLI、iOS 模拟器或真机 
 
 **可重录**
 - 改了被演示的工具：一条 `reel make` 重录，不手调时间线。
-- 介绍片里只有一个场景要改：`reel make <场景>.toml` 只重录这一段，`reel compose film.toml` 重新拼接，其他场景不动。
+- 介绍片里只改了某些场景：`reel make film.toml` 只重录用到的文件（剧本、它提到的脚本和页面，一路追下去）变了的场景，其他场景复用上次的录制；被演示的工具本身升级了（不在剧本目录里），用 `REEL_RERECORD=always` 全部重录。也可以 `reel make <场景>.toml` 只录这一段，再 `reel compose film.toml`。
 - 只改了手机的排布或对齐：`reel plan` 加 `reel compose`，原始录像不动。
 
 ## 写分镜
@@ -103,7 +103,7 @@ description: 录产品演示视频和 GIF：终端 CLI、iOS 模拟器或真机 
 2. 运行 `reel make examples/<项目名>/<分镜>.toml`（介绍片用 `film.toml`）。终端场景会先不录屏预演一遍（几十秒）：命令非零退出、等不到 `wait`、屏幕上出现家目录路径或用户名这类问题当场报出来，不用等录完；分镜目录里的文件都没变、上次预演通过时跳过，`REEL_REHEARSE=always` 强制重跑。预演用 tmux 自己的屏幕判断，录制工具画面卡住、模拟器加载慢这类只在录屏时出现的问题它查不出。录的是 PATH 上的工具；要录当前检出的构建，在准备脚本里先编译、把产物目录放到 PATH 前面。完成判据：结尾打印 `check: PASS`，每项都是 `ok`；有 `BAD` 按下方"出错时"修到全部 ok。
 3. 运行 `reel sheet <同一份分镜>`，打开产物目录里的 `sheet.png`（24 格，覆盖全片）。完成判据：逐格对照"成片标准"看过；首帧、每个镜头框住的位置、字幕和画面是否对得上、有没有截断，每一处问题都记下秒数。
 4. 真人出镜（用户要时）：请用户在自己的终端运行 `reel narrate <分镜>`，边看成片边讲；第一次会要摄像头和麦克风权限。脸贴着摄像头画面底边时没法居中，请用户坐正；底噪明显时请用户离麦克风近一些再录。完成判据：产物目录里有 `x-presenter.mp4` 和 `readme-presenter.mp4`。
-5. 交付。完成判据：用户拿到每个文件的路径、时长、大小、检查结果和审片记下的问题；要放进项目的那份已复制到项目里（如 `docs/demo/demo.gif`），README 里用 `![<一句话说明>](docs/demo/demo.gif)` 引用；提交和推送等用户说了再做。
+5. 交付。录完一轮迭代后运行 `reel gc`，列出剧本已经不在的状态和成品目录，用户确认后 `reel gc --yes` 删除。完成判据：用户拿到每个文件的路径、时长、大小、检查结果和审片记下的问题；要放进项目的那份已复制到项目里（如 `docs/demo/demo.gif`），README 里用 `![<一句话说明>](docs/demo/demo.gif)` 引用；提交和推送等用户说了再做。
 6. 带声音的视频放进 GitHub README（用户要时；GIF 没有声音）：用户说了"帮我放上去"就是同意，只问"怎么弄"时先讲步骤、再问要不要代办。用用户已登录的浏览器打开 GitHub 网页文件编辑器，上传视频，编辑器会在光标处插入一个 `https://github.com/user-attachments/assets/...` 地址，让它单独占一行（GitHub 才会渲染成播放器），并在网页上提交那次编辑。只上传不提交、或用 git 推送引用同一地址，地址对上传者以外的人一律 404（2026-11-22 在 agent-quay 实测）。完成判据：用没有登录 GitHub 的浏览器（如 Claude 内置浏览器）打开 README，视频能播放。帖子文案交给 x-post。
 
 ## 出错时
