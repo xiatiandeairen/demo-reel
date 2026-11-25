@@ -5,20 +5,30 @@
     "cwd": "/Users/taoxia/Workspace/self/demo-reel",
     "turn": "给 agent-quay 录一个 README 首屏用的演示 GIF。先别录，告诉我你会怎么做、交付物有哪些、怎么判断能交付。",
     "expect": [
-      "先读被演示项目的 README 和 --help，挑一个问题→操作→结果；examples/aq/ 已存在时在原文件上改",
-      "reel make 结尾 check: PASS 且每项 ok 才往下；再 reel sheet 逐格审片",
-      "交付物：readme.gif 和 readme.mp4（都不超过 10 MB）、x.mp4，给出产物目录路径、时长、大小",
-      "要放进项目的那份复制进去，提交和推送等用户说了再做"
+      "写剧本之前先和用户对齐 6 项：语言、风格、主片讲哪件事、场景表、每步字幕、数字来源",
+      "剧本放在被演示项目的 .agents/demo-reel/<名字>/；演示环境和设备由 agent 自己准备，每个场景的初始状态由 reset 保证",
+      "reel make 结尾 PASS 且每项 ok 才往下；再看三张联系表逐格审片",
+      "交付物：share.mp4、readme.mp4、<项目>/assets/<名字>.gif，给出路径、时长、大小；提交和推送等用户说了再做"
     ]
   },
   {
     "id": "D2",
     "name": "检查不过",
     "cwd": "/Users/taoxia/Workspace/self/demo-reel",
-    "turn": "reel make 结尾的检查里 sensitive text 是 BAD，readme.gif size 也是 BAD。分别怎么办？只给做法。",
+    "turn": "reel make 结尾的检查里 sensitive 是 FAIL，size 也是 FAIL。分别怎么办？只给做法。",
     "expect": [
-      "sensitive text：看产物目录 leaks/ 截图，改分镜或准备脚本让它不出现再重录，不改检查规则",
-      "readme.gif size：缩短演示或减少整屏变化；gif_max_mb 只能调低，上限 10"
+      "sensitive：看 leaks/ 截图，改剧本或环境让它不出现，再 reel make --rerecord，不改检查规则",
+      "size：缩短主片或减少整屏变化"
+    ]
+  },
+  {
+    "id": "E8",
+    "name": "一句话出片先对齐",
+    "cwd": "/Users/taoxia/Workspace/self/demo-reel",
+    "turn": "给 agent-build 做一套演示，X 和 README 都要。",
+    "expect": [
+      "不直接写剧本或运行 reel：先向用户逐项确认语言、风格、主片讲哪件事、场景表（给出默认框架供选）、每步字幕、结果卡数字来源",
+      "说明交付物是 share.mp4、readme.mp4 和 assets/<名字>.gif"
     ]
   }
 ]

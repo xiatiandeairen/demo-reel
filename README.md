@@ -2,85 +2,83 @@
 
 English · [简体中文](README.zh-CN.md)
 
-Turn a short script into a polished product demo for X and your README: real commands, a camera that follows the action, long waits cut, title cards and captions, and files that fit each platform. Made for coding agents to drive, so re-recording after a change is one sentence.
+A skill for coding agents that turns a short script into polished product demos: the film you post on X and YouTube, the GIF and video for your README. Commands really run, the camera follows the action, waits are cut, every step has a caption, and the files fit each platform. After a change, re-recording is one sentence to your agent.
 
 ![aq's demo, recorded by demo-reel: the camera moves to each agent's pane as it types, idle waits are cut, captions explain each step](docs/demo/aq.gif)
 
-<sub>The demo above was produced by demo-reel from [examples/aq/reel.toml](examples/aq/reel.toml). Every aq call in it is real.</sub>
+<sub>Produced by demo-reel from [examples/aq/cli](examples/aq/cli). Every aq call in it is real.</sub>
 
 ## What you get
 
-- **One script, every platform.** `x.mp4` for the X timeline (1920×1080 H.264), `readme.gif` and `readme.mp4` for GitHub, each under the platform's size limit.
-- **A camera that follows the action.** Each step's start time is logged while recording; the picture shows where things change. The camera eases to that area, and stillness longer than two seconds is cut.
-- **Checked before you see it.** Format, length and size limits, a legible first frame, and OCR over every half second for tokens, API keys, home-folder paths and your own private patterns.
-- **Made like the launches you scroll past.** It opens on the product, not a title card; the camera pushes in on the lines that change and pulls back at the end; web demos get a large gliding cursor with click ripples; moves carry a touch of motion blur.
-- **Narration that reads without sound.** One sentence per step appears as a caption, with keycaps for shortcuts. Optional: a local, natural-sounding voice reads it (Kokoro), or you talk over the film on camera (`reel narrate`).
-- **A film and its clips.** Mark steps as feature clips and get 4–15 s loops next to the main film, each as MP4 and GIF.
-- **A longer walkthrough, scene by scene.** List scenes in a `film.toml` (a drawn problem, the same demo without and with your tool, a terminal beside live iOS simulators, a results card computed from the recordings, the install) and get one film of up to 90 s, joined with crossfades. Each scene re-records on its own. Example: `examples/aq/film.toml`.
-- **Real, not staged.** Steps that wait for output fail the recording if it never shows, instead of producing a demo of a broken run.
+| File | For | Content |
+|---|---|---|
+| `share.mp4` (1920×1080 H.264 High) | X and YouTube | The full story, up to 90 s: a hook, the problem, why the usual way fails, your tool, the result, how to install |
+| `readme.mp4` (1280×720, under 10 MB) | The README video | The same without the hook and the name reveal |
+| `assets/<name>.gif` (under 10 MB) | The top of your README | One scene, up to 30 s, looping |
 
-Supported subjects: terminal CLIs (VHS + tmux), iOS apps on a simulator or a real iPhone (agent-device), web pages (agent-browser) and Mac app windows (agent-desktop + screencapture).
+- **Recorded for real.** A step that waits for output fails the take if it never shows, so you never get a demo of a broken run. Every scene is rehearsed off camera first.
+- **A camera that follows the action.** It pushes in on the lines that change and pulls back at the end. Phones, pages and windows are shown whole.
+- **Readable without sound.** Captions on every step. Optional local narration in English or Chinese (Kokoro), or talk over the film yourself on camera (`reel narrate`).
+- **Numbers from the recording.** Result cards and timer bars are computed from what the scenes logged, never typed in.
+- **Checked before you see it.** Size, format and length limits, OCR every half second for tokens, keys, home paths and your own private patterns, narration loudness, and deliverables that match the latest edit.
+- **Only what changed is redone.** Change a caption and the film is edited again without recording.
+
+Subjects: terminal CLIs (VHS + tmux), iOS and Android apps on simulators, emulators or phones (agent-device), web pages (agent-browser), Mac app windows (agent-desktop + screencapture). macOS only.
 
 ## Quick start
 
 ```bash
 git clone https://github.com/xiatiandeairen/demo-reel ~/demo-reel
 ln -s ~/demo-reel/skill ~/.claude/skills/demo-reel   # for Claude Code
-~/demo-reel/bin/reel make ~/demo-reel/examples/aq/reel.toml
+~/demo-reel/bin/reel make ~/demo-reel/examples/hello/cli/reel.toml
 ```
 
-Then ask your agent: "record a demo of this CLI for the README". It writes the storyboard under `examples/<project>/reel.toml` here (your project only receives the finished GIF), runs `reel make`, and reports the files and the check results.
+Then ask your agent: "record a demo of this project for the README". Before writing anything it agrees with you on the language, the look, the one thing the GIF shows, the scenes, every caption and where each number comes from. It then writes the script into your project under `.agents/demo-reel/<name>/`, prepares the demo environment, runs `reel make`, reviews the contact sheets and reports the files.
 
-A terminal script looks like this:
+A reel is a folder:
+
+```
+.agents/demo-reel/cli/
+  reel.toml          language, look, which scenes each file uses, result cards
+  scenes/with.toml   one scene: what to type or tap, what to wait for, what the caption says
+  scripts/           the agent's preparation and reset scripts
+```
 
 ```toml
-title = "aq"
-subtitle = "A local queue and device lender for parallel AI agents"
-url = "github.com/xiatiandeairen/agent-quay"
+# scenes/with.toml
 kind = "terminal"
+reset = "bash scripts/setup.sh $REEL_WORK"   # run before the rehearsal and before the take
 
 [terminal]
-workdir = "/tmp/aq-demo"     # paths on screen never show your home folder
-setup = "setup.sh"
+workdir = "/tmp/aq-demo-with"                 # paths on screen never show your home folder
 
 [[pane]]
 name = "agent A"
 [[pane]]
 name = "aq status --top"
-run = "aq status --top"
-noisy = true                 # a live dashboard: not counted as activity
+run = "aq status --top"                       # a live dashboard
 
 [[step]]
 pane = "agent A"
 type = "aq run -- ./build.sh"
-wait = "ok"                  # fails the recording if this never appears
-caption = "Agent A starts a build"
+wait = "ok"                                   # fails the take if this never appears
+say = "With aq, the same build runs once."
 ```
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `reel make <reel.toml>` | Everything below, in order |
-| `reel record <reel.toml>` | `stage.mp4` and `events.json` (step times, pane regions) |
-| `reel plan <reel.toml>` | `timeline.json`: camera shots, cuts, captions |
-| `reel compose <dir>` | `master.mp4` |
-| `reel export <dir>` / `reel check <dir>` | Platform files in `<dir>/out`, then the checks |
-| `reel sheet <dir>` | A 24-frame contact sheet of the whole film, for review |
-| `reel sync <dir>` | Logged step times against visible changes |
-| `reel narrate <dir>` | Plays the film while recording your camera and voice; adds a picture-in-picture presenter and captions from what you said |
-
-Rendering is plain ffmpeg; title cards and captions are drawn by headless Chrome.
+| `reel make <reel.toml> [--rerecord]` | Preflight, narration, rehearsal, take, edit, cards, join, export, checks, contact sheets; redoes only what changed. `--rerecord` records again, e.g. after the demoed tool was upgraded |
+| `reel narrate <reel.toml> [--cut share\|readme]` | Run it yourself: plays the film while recording your camera and voice, and adds a picture-in-picture presenter with captions from what you said |
 
 ## Where files go
 
-Nothing is written next to `reel.toml`. Deliverables go to `$XDG_DATA_HOME/demo-reel/<folder>-<file>-<hash>/` (default `~/.local/share/...`; `reel make` prints it), recordings and timelines to `$XDG_STATE_HOME/demo-reel/<folder>-<file>-<hash>/` (default `~/.local/state/...`), so `reel plan` and `reel compose` can redo a film without recording again. `reel gc` lists what a deleted spec left behind. Voice and transcription tools and models live in `$XDG_CACHE_HOME/demo-reel/`.
+The script lives in your project (`.agents/demo-reel/<name>/`) and the GIF goes to `<project>/assets/<name>.gif`, never over a file demo-reel did not write. Everything else follows the XDG folders: recordings and edits in `$XDG_STATE_HOME/demo-reel/` (default `~/.local/state`), the mp4s, report and contact sheets in `$XDG_DATA_HOME/demo-reel/` (`~/.local/share`), voice models in `$XDG_CACHE_HOME/demo-reel/` (`~/.cache`). Private sensitive-text patterns (company domains, internal hosts) go in `~/.config/demo-reel/private.txt`, one regular expression per line, so they never enter a repository.
 
 ## Requirements
 
-macOS, Python 3.11+, ffmpeg, Google Chrome. Terminal demos: vhs, tmux, Homebrew bash. iOS: agent-device and Xcode simulators; a real iPhone also needs agent-device's runner signed by your team (export its `AGENT_DEVICE_IOS_*` variables), the phone unlocked, and Enable UI Automation on. Web: agent-browser. Devices and browsers are borrowed through [aq](https://github.com/xiatiandeairen/agent-quay). Mac windows need an awake display and Screen Recording permission.
-
-Private patterns for the sensitive-text check (company domains, internal hosts) go in `~/.config/demo-reel/private.txt`, one regular expression per line, so they never enter a repository.
+macOS, Python 3.11+, ffmpeg, Google Chrome. Terminal: vhs, tmux, Homebrew bash. iOS: agent-device and Xcode; Android: agent-device and the Android SDK (adb, emulator); a real phone needs to be unlocked with UI automation or USB debugging on. Web and animations: agent-browser. Mac windows: agent-desktop, an awake display and Screen Recording permission. Narration: uv (installs Kokoro on first use).
 
 ## License
 
