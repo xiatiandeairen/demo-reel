@@ -108,6 +108,11 @@ def sensitive(videos: list, pats: list, leaks_dir: Path) -> list:
     return leaks
 
 
+def stale(made: dict, stamps: dict) -> list:
+    """Deliverables not made from their cut's current stamp (CASE-E5)."""
+    return [n for n, m in made.items() if stamps.get(m["cut"]) != m.get("cut_stamp")]
+
+
 def check(made: dict, gif_cut: Path, stamps: dict, narrated: bool, leaks_dir: Path) -> list:
     """[{name, ok, detail}] for the deliverables `made` (export's result). gif_cut: the GIF's cut video,
     read for sensitive text; stamps: {cut: its current stamp}, each deliverable's made-from stamp is in made."""
@@ -138,9 +143,9 @@ def check(made: dict, gif_cut: Path, stamps: dict, narrated: bool, leaks_dir: Pa
         lufs = {n: loudness(v) for n, v in (("share.mp4", share), ("readme.mp4", readme))}
         add("loudness", all(v is not None and abs(v + 16) <= 2 for v in lufs.values()),
             " · ".join(f"{n} {'no audio' if v is None else f'{v:.1f} LUFS'}" for n, v in lufs.items()) + " (target -16 ± 2)")
-    stale = [n for n, m in made.items() if stamps.get(m["cut"]) != m.get("cut_stamp")]
-    add("fresh", not stale, "each deliverable is from its latest cut" if not stale else
-        f"{', '.join(stale)} not made from the latest cut: run reel make again")
+    late = stale(made, stamps)
+    add("fresh", not late, "each deliverable is from its latest cut" if not stale else
+        f"{', '.join(late)} not made from the latest cut: run reel make again")
     return results
 
 
