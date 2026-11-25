@@ -1,8 +1,9 @@
-"""Integration cases for the aq walkthrough film (docs/multi-scene.md), read from its last recording.
+"""Integration cases for the aq reel (examples/aq/cli), read from its last recording.
 
-Run after `reel make examples/aq/film.toml` with: REEL_INTEGRATION=1 python3 -m unittest tests.test_film_integration
-(`reel test --integration` does this). They read the scenes' state directories; nothing is recorded here,
-except CASE-C6.3, which composes the film again.
+Run after `bin/reel make examples/aq/cli/reel.toml` with:
+REEL_INTEGRATION=1 python3 -m unittest tests.test_film_integration
+They read the scenes' takes and edits; nothing is recorded here. CASE-C6.3 runs reel make again and
+expects every take to be reused.
 """
 import json
 import os
@@ -14,21 +15,21 @@ from pathlib import Path
 from reel import check, paths, screens, spec, timeline
 
 ROOT = Path(__file__).resolve().parent.parent
-AQ = ROOT / "examples" / "aq"
+AQ = ROOT / "examples" / "aq" / "cli" / "reel.toml"
 RUN = os.environ.get("REEL_INTEGRATION") == "1"
 
 
-def state(name: str) -> Path:
-    return paths.state_dir(spec.load(AQ / name))
+def reel() -> dict:
+    return spec.load(AQ)
 
 
-def scene(name: str):
-    st = state(name)
-    if not (st / "events.json").exists():
-        raise unittest.SkipTest(f"{name} has not been recorded")
-    ev = json.loads((st / "events.json").read_text())
-    tl = json.loads((st / "timeline.json").read_text())
-    return st, ev, tl
+def scene(sid: str):
+    """(take dir, events, timeline) of a recorded scene."""
+    r = reel()
+    take, edit = paths.take_dir(r, sid), paths.edit_dir(r, sid)
+    if not (take / "events.json").exists() or not (edit / "timeline.json").exists():
+        raise unittest.SkipTest(f"{sid} has not been recorded")
+    return take, json.loads((take / "events.json").read_text()), json.loads((edit / "timeline.json").read_text())
 
 
 def shown(tl: dict, t: float) -> bool:
@@ -52,7 +53,7 @@ def commands(ev: dict, text: str) -> list:
 class SharedSimulator(unittest.TestCase):
     # CASE-C2: on the one shared simulator, A's page comes up and B's then replaces it, on screen.
     def test_b_pushes_a_off(self):
-        st, ev, tl = scene("without-aq.toml")
+        st, ev, tl = scene("without")
         colours = screens.timeline(st / "stage.mp4", ev["regions"]["the only simulator"])
         a_cmd, b_cmd = commands(ev, "sim-open A")[0], commands(ev, "sim-open B")[0]
         t_a = screens.first(colours, "A", a_cmd["start"])
@@ -67,7 +68,7 @@ class SharedSimulator(unittest.TestCase):
 class OwnSimulators(unittest.TestCase):
     # CASE-C3: in the scene's last 3 s, A's phone shows A's page and B's shows B's, at the same time.
     def test_each_keeps_its_own(self):
-        st, ev, tl = scene("borrow.toml")
+        st, ev, tl = scene("borrow")
         end = tl["keep"][-1][1]
         for name, label in (("agent A's simulator", "A"), ("agent B's simulator", "B")):
             colours = screens.timeline(st / "stage.mp4", ev["regions"][name])
@@ -78,8 +79,8 @@ class OwnSimulators(unittest.TestCase):
     # (film time; the sim-open steps are marked squeeze, so a slow page load is cut although Safari's
     # progress bar moves).
     def test_phones_follow_their_commands(self):
-        for name, dev_of in (("without-aq.toml", {"A": "the only simulator", "B": "the only simulator"}),
-                             ("borrow.toml", {"A": "agent A's simulator", "B": "agent B's simulator"})):
+        for name, dev_of in (("without", {"A": "the only simulator", "B": "the only simulator"}),
+                             ("borrow", {"A": "agent A's simulator", "B": "agent B's simulator"})):
             st, ev, tl = scene(name)
             for label, dev in dev_of.items():
                 cmd = commands(ev, f"sim-open {label}")[0]
@@ -96,33 +97,34 @@ class OwnSimulators(unittest.TestCase):
 
 @unittest.skipUnless(RUN, "set REEL_INTEGRATION=1")
 class ResultsCard(unittest.TestCase):
-    # CASE-C5: the card's figures are what runs.log says, and the card shows them.
+    # CASE-C5: the card's figures are what the scenes' kept runs.log say, and the card shows them.
     def test_figures_match_the_logs(self):
-        st = state("result.toml")
-        if not (st / "card.json").exists():
-            raise unittest.SkipTest("result.toml has not been made")
-        runs = {k: [l.split() for l in Path(f"/tmp/aq-demo-{k}/runs.log").read_text().splitlines() if l.strip()]
+        r = reel()
+        card = paths.edit_dir(r, "result")
+        if not (card / "card.json").exists():
+            raise unittest.SkipTest("the result card has not been made")
+        runs = {k: [l.split() for l in (paths.take_dir(r, k) / "files" / "runs.log").read_text().splitlines() if l.strip()]
                 for k in ("without", "with")}
         want = [f"Builds run: {len(runs['without'])} → {len(runs['with'])}",
                 "Build time: {} s → {} s".format(*(sum(int(b) - int(a) for a, b in runs[k]) for k in ("without", "with")))]
-        self.assertEqual(json.loads((st / "card.json").read_text())["lines"], want)
-        seen = " ".join(check.ocr([st / "card.png"])[str(st / "card.png")])
+        self.assertEqual(json.loads((card / "card.json").read_text())["lines"], want)
+        seen = " ".join(check.ocr([card / "card.png"])[str(card / "card.png")])
         for line in want:
             for number in re.findall(r"\d+", line):
                 self.assertIn(number, seen)
 
 
 @unittest.skipUnless(RUN, "set REEL_INTEGRATION=1")
-class Recompose(unittest.TestCase):
-    # CASE-C6.3: composing the film again reuses every recorded scene.
-    def test_compose_does_not_record_again(self):
-        film = spec.load(AQ / "film.toml")
-        stages = [paths.state_dir(spec.load(p)) / "stage.mp4" for p in film["_scenes"] if spec.load(p)["kind"] != "card"]
+class Remake(unittest.TestCase):
+    # CASE-C6.3, CASE-D5: reel make again with nothing changed records no scene again.
+    def test_make_does_not_record_again(self):
+        r = reel()
+        stages = [paths.take_dir(r, sid) / "stage.mp4" for sid in r["scenes"]]
         if not all(s.exists() for s in stages):
             raise unittest.SkipTest("not every scene has been recorded")
         before = [s.stat().st_mtime for s in stages]
-        subprocess.run([str(ROOT / "bin" / "reel"), "compose", str(AQ / "film.toml")], check=True, capture_output=True)
-        self.assertEqual([s.stat().st_mtime for s in stages], before)
+        out = subprocess.run([str(ROOT / "bin" / "reel"), "make", str(AQ)], capture_output=True, text=True)
+        self.assertEqual([s.stat().st_mtime for s in stages], before, out.stdout[-800:])
 
 
 if __name__ == "__main__":

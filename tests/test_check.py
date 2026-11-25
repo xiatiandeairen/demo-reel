@@ -1,6 +1,6 @@
 """Cases for sensitive-text detection and the GIF size ladder.
 
-Integration cases run only with REEL_INTEGRATION=1 (bin/reel test --integration).
+Integration cases run only with REEL_INTEGRATION=1 python3 -m unittest discover -s tests.
 Fake secrets are assembled at run time so the repo itself holds none.
 """
 import getpass
