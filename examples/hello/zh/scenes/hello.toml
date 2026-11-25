@@ -1,0 +1,18 @@
+kind = "terminal"
+reset = "bash scripts/reset.sh"
+
+[terminal]
+workdir = "/tmp/reel-hello-zh"
+keep_files = ["out.txt"]
+
+[[step]]
+type = "seq 3 | tee out.txt"
+wait = "3"
+say = "从一数到三。"
+hold = 1.0
+
+[[step]]
+type = "wc -l out.txt"
+wait = "3 out.txt"
+say = "三行内容，都写进了文件里，一行也没有丢，接下来就可以拿去用了。"
+hold = 1.5

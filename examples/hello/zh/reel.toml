@@ -1,0 +1,15 @@
+# The smallest reel in Chinese (CASE-E9): Chinese captions and the Chinese voice.
+lang = "zh"
+narrate = true
+
+[share]
+scenes = ["hello", "result"]
+[readme]
+scenes = ["hello"]
+[gif]
+scene = "hello"
+
+[card.result]
+lines = ["写入了 {lines} 行"]
+[card.result.values]
+lines = "wc -l < {files:hello}/out.txt | tr -d ' '"

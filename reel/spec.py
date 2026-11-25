@@ -42,7 +42,6 @@ from pathlib import Path
 KINDS = ("terminal", "ios", "android", "web", "mac", "animation")
 LANGS = ("en", "zh")
 DEFAULT_ACCENT = ["#1f3b8f", "#1596b8"]
-VOICES = {"en": "am_michael"}  # zh: chosen with the Chinese voice (docs/design.md, step 7)
 
 APP_VERBS = ("click", "fill", "type", "key", "scroll", "back")
 STEP_COMMON = ("say", "wait", "hold")
@@ -232,7 +231,7 @@ def load_scene(path: Path, reel: dict) -> dict:
     sc = {**raw, "id": path.stem, "_path": str(path), "_dir": str(path.parent), "accent": reel["accent"],
           "lang": reel["lang"], "title": path.stem, "step": steps}
     if reel["narrate"]:
-        sc["voice"] = {"voice": VOICES.get(reel["lang"], VOICES["en"])}
+        sc["voice"] = True  # the voice itself follows lang (reel/voice.py)
     if kind == "terminal":
         _terminal(sc, where)
     return sc
