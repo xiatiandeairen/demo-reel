@@ -25,29 +25,35 @@ def _probe(path: Path) -> tuple:
     return int(d["width"]), int(d["height"]), float(d["duration"])
 
 
+TOP = 80
+CAPTION_BAND = round(H * 0.17)  # the bottom of the stage, where captions sit: nothing to read goes there
+
+
 def layout(kind: str, src_w: int, src_h: int) -> dict:
-    """Where the recording goes on the stage: hole (x, y, w, h), corner radius, frame geometry."""
-    if kind == "ios":
+    """Where the recording goes on the stage: hole (x, y, w, h), corner radius, frame geometry. The
+    recording stays above CAPTION_BAND, so a caption never covers a phone's last row or a page's bottom
+    (defect c, 2026-11-25)."""
+    room = H - TOP - CAPTION_BAND
+    bar = 72 if kind == "web" else 0
+    if kind in ("ios", "android"):
         bezel = 26
-        h = H - 2 * 90 - 2 * bezel
+        h = room - 2 * bezel
         w = round(h * src_w / src_h)
         radius = round(w * 0.14)
     elif kind == "web":
         bezel = 0
-        bar = 72
-        max_w, max_h = W - 2 * 240, H - 2 * 80 - bar
+        max_w, max_h = W - 2 * 240, room - bar
         scale = min(max_w / src_w, max_h / src_h)
         w, h = round(src_w * scale), round(src_h * scale)
         radius = 20
     else:  # mac: the window has its own title bar
         bezel = 0
-        max_w, max_h = W - 2 * 200, H - 2 * 100
+        max_w, max_h = W - 2 * 200, room
         scale = min(max_w / src_w, max_h / src_h, 2.0)
         w, h = round(src_w * scale), round(src_h * scale)
         radius = 20
-    bar = 72 if kind == "web" else 0
     x = (W - w) // 2
-    y = (H - h + bar) // 2
+    y = TOP + (room - h - bar) // 2 + bar
     return {"kind": kind, "hole": [x, y, w, h], "radius": radius, "bezel": bezel, "bar": bar,
             "scale": w / src_w, "src": [src_w, src_h]}
 
@@ -55,7 +61,7 @@ def layout(kind: str, src_w: int, src_h: int) -> dict:
 def _underlay_html(lay: dict, accent: list, label: str) -> str:
     x, y, w, h = lay["hole"]
     r, b, bar = lay["radius"], lay["bezel"], lay["bar"]
-    if lay["kind"] == "ios":
+    if lay["kind"] in ("ios", "android"):
         frame = (f'<div class="f" style="left:{x - b}px;top:{y - b}px;width:{w + 2 * b}px;height:{h + 2 * b}px;'
                  f'border-radius:{r + b}px;background:#0c0d12;box-shadow:0 0 0 3px #3a3d48,0 40px 90px rgba(0,0,0,.45)"></div>')
     elif lay["kind"] == "web":

@@ -1,0 +1,11 @@
+# Stand-in Android demo (CASE-A11): the emulator's own Settings app. Before reel make, the agent boots an
+# emulator and exports its adb serial as REEL_ANDROID.
+lang = "en"
+accent = ["#1b3a2b", "#3ddc84"]
+
+[share]
+scenes = ["main"]
+[readme]
+scenes = ["main"]
+[gif]
+scene = "main"

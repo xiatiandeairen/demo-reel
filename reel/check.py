@@ -144,7 +144,7 @@ def check(made: dict, gif_cut: Path, stamps: dict, narrated: bool, leaks_dir: Pa
         add("loudness", all(v is not None and abs(v + 16) <= 2 for v in lufs.values()),
             " · ".join(f"{n} {'no audio' if v is None else f'{v:.1f} LUFS'}" for n, v in lufs.items()) + " (target -16 ± 2)")
     late = stale(made, stamps)
-    add("fresh", not late, "each deliverable is from its latest cut" if not stale else
+    add("fresh", not late, "each deliverable is from its latest cut" if not late else
         f"{', '.join(late)} not made from the latest cut: run reel make again")
     return results
 

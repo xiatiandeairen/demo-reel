@@ -184,6 +184,32 @@ def cut_spans(keep: list, spans: list) -> list:
     return out
 
 
+REGION = {"ios": "screen", "android": "screen", "web": "page", "mac": "window"}
+
+
+def restage(spec: dict, take: Path, ev: dict) -> dict:
+    """An app, page or window recording laid on the stage again from the kept raw.mp4 when the stage's
+    layout or colours changed since the take, so changing them needs no new take."""
+    from urllib.parse import urlparse
+    from . import stage
+    kind = ev.get("kind")
+    raw = Path(take) / "raw.mp4"
+    if kind not in REGION or not raw.exists():
+        return ev
+    old = ev.get("layout", {})
+    want = stage.layout(kind, *old.get("src", stage._probe(raw)[:2]))
+    if want["hole"] == old.get("hole") and old.get("accent") == spec["accent"]:
+        return ev
+    label = urlparse(spec["web"]["url"]).netloc if kind == "web" else ""
+    lay = stage.build(raw, Path(take) / "stage.mp4", kind, spec["accent"], label)
+    lay["accent"] = spec["accent"]
+    x, y, w, h = lay["hole"]
+    ev = {**ev, "layout": lay, "regions": {**ev["regions"], REGION[kind]: [x, y, x + w, y + h]},
+          "stage": {**ev["stage"], "duration": stage._probe(Path(take) / "stage.mp4")[2]}}
+    (Path(take) / "events.json").write_text(json.dumps(ev, indent=2, ensure_ascii=False) + "\n")
+    return ev
+
+
 def plan(spec: dict, take: Path, edit: Path, scale: float = 10.0) -> Path:
     """edit/timeline.json from a scene's take (stage video + events.json) and its script."""
     take, edit = Path(take), Path(edit)
@@ -192,6 +218,7 @@ def plan(spec: dict, take: Path, edit: Path, scale: float = 10.0) -> Path:
     if ev.get("device_sync"):
         from .record_terminal import composite_devices
         composite_devices(take, spec["accent"])  # rebuilt from the kept sources: layout changes need no new take
+    ev = restage(spec, take, ev)
     st = {**ev["stage"], "path": str(take / ev["stage"]["path"])}
     regions = ev.get("regions", {})
     rect = lambda name: tuple(regions[name]) if name in regions else None

@@ -55,6 +55,13 @@ def check(reel: dict) -> list:
             if not work.is_dir():
                 rows.append((False, "workdir", f"{sid}: {work} does not exist; prepare it before reel make, "
                                                "or give the scene a reset that does"))
+        if sc["kind"] == "web":
+            import urllib.request
+            url = sc["web"]["url"]
+            try:
+                urllib.request.urlopen(url, timeout=3).close()
+            except Exception as e:  # noqa: BLE001 - any failure means the page is not up
+                rows.append((False, "page", f"{sid}: {url} does not answer ({e}); serve it before reel make"))
         if sc["kind"] in ("ios", "android"):
             block = sc[sc["kind"]]
             dev = device_id(block["device"])

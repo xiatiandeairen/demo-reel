@@ -55,7 +55,7 @@ def _run_reset(reel: dict, sc: dict) -> None:
 
 def _recorder(kind: str):
     from importlib import import_module
-    return import_module(f".record_{'ios' if kind == 'android' else kind}", __package__).record
+    return import_module(f".record_{'app' if kind in ('ios', 'android') else kind}", __package__).record
 
 
 def _take(reel: dict, sc: dict, rerecord: bool) -> tuple:
@@ -72,10 +72,12 @@ def _take(reel: dict, sc: dict, rerecord: bool) -> tuple:
         if sc["kind"] == "terminal":
             from .rehearse import rehearse, timeout
             _run_reset(reel, sc)
-            rep = rehearse(sc, paths.scene_dir(reel, sid), st)
+            rep = rehearse(sc, paths.scene_dir(reel, sid), st if not rerecord else st + "!")
             for s, secs in zip(sc["step"], rep["seconds"]):
                 s["_timeout"] = timeout(secs)
             parts.append("rehearse reused" if rep.get("reused") else f"rehearse ok {rep['total']:.0f} s")
+        else:
+            parts.append(_rehearse_other(reel, sc, st, rerecord))
         _run_reset(reel, sc)
         shutil.rmtree(td, ignore_errors=True)
         td.mkdir(parents=True)
@@ -88,6 +90,28 @@ def _take(reel: dict, sc: dict, rerecord: bool) -> tuple:
     ev = json.loads((td / "events.json").read_text())
     parts.append(f"record ok {ev['stage']['duration']:.0f} s")
     return st, " · ".join(parts)
+
+
+def _rehearse_other(reel: dict, sc: dict, st: str, again: bool = False) -> str:
+    """A rehearsal for an app, page, window or animation: the steps run once, unrecorded, after the reset;
+    reused while the take's inputs are unchanged."""
+    import time
+    from .record_terminal import RecordError
+    sd = paths.scene_dir(reel, sc["id"])
+    prev = sd / "rehearsal.json"
+    if not again and prev.exists() and json.loads(prev.read_text()).get("stamp") == st:
+        return "rehearse reused"
+    _run_reset(reel, sc)
+    t0 = time.monotonic()
+    try:
+        _recorder(sc["kind"])(sc, sd / "rehearse-tmp", rehearse=True)
+    except RecordError as e:
+        raise RecordError(f"rehearsal found a problem before recording:\n  {e}") from e
+    finally:
+        shutil.rmtree(sd / "rehearse-tmp", ignore_errors=True)
+    total = round(time.monotonic() - t0, 1)
+    prev.write_text(json.dumps({"stamp": st, "ok": True, "total": total}) + "\n")
+    return f"rehearse ok {total:.0f} s"
 
 
 def _narration(edit: Path) -> list:

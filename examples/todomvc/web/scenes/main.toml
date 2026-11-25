@@ -2,7 +2,7 @@
 kind = "web"
 
 [web]
-url = "http://127.0.0.1:8765/"
+url = "http://127.0.0.1:8777/"
 
 [[step]]
 type = [".new-todo", "Record the demo"]

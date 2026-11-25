@@ -1,5 +1,5 @@
 # Stand-in web demo (CASE-A7, CASE-C6): a drawn intro, then TodoMVC's vanilla JS app served locally.
-# Before reel make, the agent runs scripts/setup.sh, which clones TodoMVC and serves it on port 8765.
+# Before reel make, the agent runs scripts/setup.sh, which clones TodoMVC and serves it on port 8777.
 lang = "en"
 accent = ["#7a1f3d", "#c0392b"]
 

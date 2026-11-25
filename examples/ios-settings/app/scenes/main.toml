@@ -1,5 +1,7 @@
 # Stand-in iOS demo: the simulator's own Settings app (LiveTranslate has no UI yet).
 kind = "ios"
+# Settings reopens where it was left: quit it, so the rehearsal and the take both start on its first page.
+reset = "xcrun simctl terminate $REEL_SIM com.apple.Preferences || true"
 
 [ios]
 app = "Settings"

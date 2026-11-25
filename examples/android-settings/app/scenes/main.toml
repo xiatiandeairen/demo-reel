@@ -1,0 +1,18 @@
+kind = "android"
+# Settings reopens where it was left: stop it, so the rehearsal and the take both start on its first page.
+reset = "adb -s $REEL_ANDROID shell am force-stop com.android.settings"
+
+[android]
+app = "com.android.settings"
+device = "$REEL_ANDROID"
+
+[[step]]
+click = 'text="Apps"'
+wait = 'text="Default apps"'
+say = "Open Apps."
+hold = 1.5
+
+[[step]]
+back = true
+say = "And back."
+hold = 1.2
