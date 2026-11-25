@@ -77,18 +77,22 @@ MARK_OFF, MARK_ON, MARK_GLYPH = 235, 238, "█"  # xterm greys #262626 / #444444
 RETIME_FPS = 30
 PHONE_ASPECT = 1206 / 2622   # iPhone 17 Pro screen, as recordVideo writes it
 DEVICE_GAP, DEVICE_LABEL = 80, 120
+CAPTION_BAND = round(H * 0.17)  # the bottom of the stage, where captions sit at zoom 1
 UDID = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
 
 
 def device_rects(n: int) -> tuple:
-    """(terminal width, [phone screen rect]) for n phones in a column band on the right of the stage."""
+    """(terminal width, [phone screen rect]) for n phones in a column band on the right of the stage.
+    Each phone's label sits above it, and the phones end above CAPTION_BAND, so a caption never covers a
+    label or the bottom of a screen (defect c, 2026-11-24 review)."""
     if not n:
         return W, []
-    sh = H - 2 * MARGIN - DEVICE_LABEL
+    top = MARGIN + DEVICE_LABEL
+    sh = H - CAPTION_BAND - top
     sw = round(sh * PHONE_ASPECT)
     band = n * sw + (n + 1) * DEVICE_GAP
     term_w = W - band + DEVICE_GAP  # the terminal's own right margin is the first gap
-    rects = [[term_w + k * (sw + DEVICE_GAP), MARGIN, term_w + k * (sw + DEVICE_GAP) + sw, MARGIN + sh] for k in range(n)]
+    rects = [[term_w + k * (sw + DEVICE_GAP), top, term_w + k * (sw + DEVICE_GAP) + sw, top + sh] for k in range(n)]
     return term_w, rects
 
 

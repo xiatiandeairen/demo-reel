@@ -144,16 +144,28 @@ def union(rects: list) -> Rect:
             max(r[2] for r in rects), max(r[3] for r in rects))
 
 
-def frame(rect: Rect, stage_w: int, stage_h: int, max_zoom: float = MAX_ZOOM) -> dict:
-    """Camera (center, zoom) that shows rect with some room, never outside the stage."""
+EDGE = 24  # stage pixels a view may reach past its pane's edge (the border between panes)
+
+
+def frame(rect: Rect, stage_w: int, stage_h: int, max_zoom: float = MAX_ZOOM, within: Rect | None = None) -> dict:
+    """Camera (center, zoom) that shows rect with some room, never outside the stage. A view smaller
+    than `within` (the pane it frames) stays inside it, so no sliver of the neighbouring pane, with
+    words cut in half, shows at the view's edge (defect b, 2026-11-24 review)."""
     x0, y0, x1, y1 = rect
     rw, rh = (x1 - x0) * (1 + 2 * PAD), (y1 - y0) * (1 + 2 * PAD)
     if rw * rh >= FULL_SHARE * stage_w * stage_h:
         return {"x": stage_w / 2, "y": stage_h / 2, "zoom": 1.0}
     zoom = max(1.0, min(max_zoom, stage_w / max(rw, 1), stage_h / max(rh, 1)))
     half_w, half_h = stage_w / zoom / 2, stage_h / zoom / 2
-    cx = min(max((x0 + x1) / 2, half_w), stage_w - half_w)
-    cy = min(max((y0 + y1) / 2, half_h), stage_h - half_h)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    if within:
+        wx0, wy0, wx1, wy1 = within
+        if 2 * half_w <= wx1 - wx0 + 2 * EDGE:
+            cx = min(max(cx, wx0 - EDGE + half_w), wx1 + EDGE - half_w)
+        if 2 * half_h <= wy1 - wy0 + 2 * EDGE:
+            cy = min(max(cy, wy0 - EDGE + half_h), wy1 + EDGE - half_h)
+    cx = min(max(cx, half_w), stage_w - half_w)
+    cy = min(max(cy, half_h), stage_h - half_h)
     return {"x": round(cx, 1), "y": round(cy, 1), "zoom": round(zoom, 3)}
 
 
@@ -162,8 +174,7 @@ def _same(a: dict, b: dict) -> bool:
             and abs(a["x"] - b["x"]) < 40 and abs(a["y"] - b["y"]) < 40)
 
 
-def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM,
-         end_full_at: float | None = None) -> tuple:
+def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM) -> tuple:
     """Returns (shots, keep) for the timeline.
 
     Each beat gets one framing: its focus rects if given, otherwise the box around what changed
@@ -174,21 +185,20 @@ def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM
     full = {"x": W / 2, "y": H / 2, "zoom": 1.0}
     cams = []
     for b in beats:
+        area = union(b.focus) if b.focus else None
         if b.focus and b.tight:
-            area = union(b.focus)
             changed = act.bbox(b.start, b.end, b.quiet_ignore, within=area)
             target = _tighten(changed, area) if changed else area
         elif b.focus:
-            target = union(b.focus)
+            target = area
         else:
             target = act.bbox(b.start, b.end, b.quiet_ignore)
-        cams.append(frame(target, W, H, max_zoom) if target else full)
+        cams.append(frame(target, W, H, max_zoom, within=area) if target else full)
 
     # Always open on the whole stage, so viewers see the layout before the camera moves in.
     shots = [{"t": 0.0, **full}]
     current = shots[0]
-    end_at = duration if end_full_at is None else end_full_at
-    pulled_back = False
+    end_at = duration
 
     def back_to_full():
         nonlocal current
@@ -204,23 +214,17 @@ def plan(beats: list, act: Activity, duration: float, max_zoom: float = MAX_ZOOM
         current = full
 
     for b, cam in zip(beats, cams):
-        if not pulled_back and b.start >= end_at - 0.01:
-            back_to_full()  # the main film ends here; later steps only feed clips
-            pulled_back = True
         if _same(cam, current):
             continue
         first = len(shots) == 1
         t_move = max(b.start - LEAD, shots[-1]["t"] + 0.01, OPEN_HOLD if first else 0.0)
-        if pulled_back:
-            t_move = max(t_move, end_at)  # steps after the main film move only once it has ended
         move = OPEN_MOVE if first else MOVE
         shots.append({"t": round(t_move, 3), **{k: current[k] for k in ("x", "y", "zoom")}})
         shots.append({"t": round(t_move + move, 3), **cam})
         current = cam
 
     # End on the whole stage again, like the references: the last thing seen is the full picture.
-    if not pulled_back:
-        back_to_full()
+    back_to_full()
 
     keep = _keep(beats, act, duration)
     return shots, keep

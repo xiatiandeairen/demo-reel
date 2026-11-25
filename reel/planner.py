@@ -6,8 +6,6 @@ from pathlib import Path
 
 from . import motion, timeline
 
-INTRO_SECONDS = 1.8
-OUTRO_SECONDS = 1.8
 
 
 ANCHOR_SEARCH = 3.0   # seconds around a logged command start to look for its Enter on screen
@@ -215,7 +213,9 @@ def plan(spec: dict, take: Path, edit: Path, scale: float = 10.0) -> Path:
         beats.append(motion.Beat(
             start=b["start"], end=b["end"], label=b.get("label", ""),
             focus=[rect(n) for n in b.get("focus", []) if rect(n)] or list(map(tuple, b.get("focus_rects", []))),
-            quiet_ignore=[rect(n) for n in b.get("ignore", []) if rect(n)],
+            # The step marker (bottom right) flips at every step: not something the viewer should follow.
+            # Counting it stretched every single-pane framing to the whole pane (defect a, 2026-11-25).
+            quiet_ignore=[rect(n) for n in [*b.get("ignore", []), "_marker"] if rect(n)],
             tight=ev.get("kind") == "terminal" and not b.get("full"),
             protect=b.get("narration", 0.0)))
     # Pages and windows are framed from what changed, cursor included: keep more context there.
@@ -234,7 +234,6 @@ def plan(spec: dict, take: Path, edit: Path, scale: float = 10.0) -> Path:
 
     data = {
         "stage": st,
-        "output": {"width": 1920, "height": 1080, "fps": 30},
         "style": {"accent": spec["accent"], "kind": ev["kind"]},
         "keep": keep,
         "shots": shots,

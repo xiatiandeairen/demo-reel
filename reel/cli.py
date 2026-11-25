@@ -107,7 +107,7 @@ def _edit(reel: dict, sc: dict, take_stamp: str, scale: float, take: Path | None
     if stamp.fresh(ed, es, "scene.mp4", "timeline.json"):
         return es, "reused"
     plan(sc, take or paths.take_dir(reel, sc["id"]), ed, scale)
-    compose(ed / "timeline.json", ed / "scene.mp4", with_cards=True, fade_out=False)
+    compose(ed / "timeline.json", ed / "scene.mp4", fade_out=False)
     stamp.write(ed, es)
     return es, "edit ok"
 
@@ -135,7 +135,18 @@ def _edit_card(reel: dict, sc: dict, ed: Path) -> None:
     from .compose_ffmpeg import compose
     from .planner import plan
     plan(sc, ed, ed)
-    compose(ed / "timeline.json", ed / "scene.mp4", with_cards=True, fade_out=False)
+    compose(ed / "timeline.json", ed / "scene.mp4", fade_out=False)
+
+
+def _head(reel: dict, sid: str, position: int) -> float:
+    """Seconds cut from a scene's opening in a cut: a terminal scene opens on its whole layout for
+    motion.OPEN_HOLD; later in a cut 0.6 s is enough, since the crossfade already shows it."""
+    from .motion import OPEN_HOLD
+    kind = (reel["scenes"].get(sid) or {}).get("kind")
+    return round(OPEN_HOLD - LATER_OPEN, 3) if position and kind == "terminal" else 0.0
+
+
+LATER_OPEN = 0.6
 
 
 def _sheet(video: Path, png: Path) -> str:
@@ -211,8 +222,8 @@ def make(reel_path: str, rerecord: bool = False) -> int:
         cs = stamp.digest("cut", cut, [edits[i] for i in ids_], stamp.code())
         cd = paths.cut_dir(reel, cut)
         if not stamp.fresh(cd, cs, "master.mp4", "cut.json"):
-            stitch([(i, paths.edit_dir(reel, i) / "scene.mp4", _narration(paths.edit_dir(reel, i))) for i in ids_],
-                   cd, fade_out=cut != "gif")
+            stitch([(i, paths.edit_dir(reel, i) / "scene.mp4", _narration(paths.edit_dir(reel, i)), _head(reel, i, k))
+                    for k, i in enumerate(ids_)], cd, fade_out=cut != "gif")
             stamp.write(cd, cs)
         cut_stamps[cut], masters[cut] = cs, cd / "master.mp4"
         info = json.loads((cd / "cut.json").read_text())

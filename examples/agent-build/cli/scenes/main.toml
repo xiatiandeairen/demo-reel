@@ -12,13 +12,11 @@ init = "source $REEL_WORK/env; cd $REEL_WORK/app"
 type = "agb xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator'"
 wait = "agb: ok"
 timer = "first build"
-focus = "full"
 say = "Put agb in front of xcodebuild."
 hold = 1.0
 
 [[step]]
 type = "cd ../app-feature"
-focus = "full"
 say = "Then switch to a new worktree."
 hold = 0.3
 
@@ -26,6 +24,5 @@ hold = 0.3
 type = "agb xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator'"
 wait = 'agb: ok[\s\S]*agb: ok'
 timer = "new worktree"
-focus = "full"
 say = "It builds in seconds, from the warm slot."
 hold = 2.0

@@ -38,16 +38,19 @@ def _duration(path: Path) -> float:
 
 
 def stitch(scenes: list, out: Path, fade_out: bool = True) -> dict:
-    """out/master.mp4 and out/cut.json from scenes [(id, scene.mp4, [(wav, seconds)])], in order."""
+    """out/master.mp4 and out/cut.json from scenes [(id, scene.mp4, [(wav, seconds)], head)], in order;
+    head: seconds cut from the scene's start (a terminal scene later in a cut opens on its layout for
+    0.6 s instead of 1.5 s: the crossfade already showed it)."""
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    durations = [_duration(v) for _, v, _ in scenes]
+    durations = [_duration(v) - head for _, v, _, head in scenes]
     starts, total = scene_starts(durations)
-    items = shift_items([n for _, _, n in scenes], starts)
-    inputs = [a for _, v, _ in scenes for a in ("-i", str(v))]
-    g, last = [], "0:v"
+    items = shift_items([[(w, round(at - head, 3)) for w, at in n if at - head >= 0] for _, _, n, head in scenes], starts)
+    inputs = [a for _, v, _, _ in scenes for a in ("-i", str(v))]
+    g = [f"[{k}:v]trim=start={head:.3f},setpts=PTS-STARTPTS[s{k}]" for k, (_, _, _, head) in enumerate(scenes)]
+    last = "s0"
     for k in range(1, len(scenes)):
-        g.append(f"[{last}][{k}:v]xfade=transition=fade:duration={XFADE}:offset={starts[k]:.3f}[x{k}]")
+        g.append(f"[{last}][s{k}]xfade=transition=fade:duration={XFADE}:offset={starts[k]:.3f}[x{k}]")
         last = f"x{k}"
     tail = f"fade=t=out:st={max(0.0, total - FADE_OUT):.3f}:d={FADE_OUT}," if fade_out else ""
     g.append(f"[{last}]{tail}format=yuv420p[v]")
@@ -61,7 +64,7 @@ def stitch(scenes: list, out: Path, fade_out: bool = True) -> dict:
         silent.unlink()
     else:
         shutil.move(str(silent), master)
-    cut = {"scenes": [{"id": sid, "start": s, "seconds": round(d, 3)} for (sid, _, _), s, d in zip(scenes, starts, durations)],
+    cut = {"scenes": [{"id": sid, "start": s, "seconds": round(d, 3)} for (sid, _, _, _), s, d in zip(scenes, starts, durations)],
            "seconds": total, "narrated": bool(items)}
     (out / "cut.json").write_text(json.dumps(cut, indent=2) + "\n")
     return cut

@@ -37,7 +37,8 @@ def _clean_master(reel: dict, cut: str, work: Path) -> tuple:
     from its edit's timeline with the captions taken out, then joined like the cut."""
     from .film import stitch
     scenes, said = [], []
-    for sid in reel["cuts"][cut]:
+    from .cli import _head
+    for k, sid in enumerate(reel["cuts"][cut]):
         ed = paths.edit_dir(reel, sid)
         if not (ed / "timeline.json").exists():
             raise RuntimeError(f"scene {sid} has no edit yet: run reel make first")
@@ -47,8 +48,8 @@ def _clean_master(reel: dict, cut: str, work: Path) -> tuple:
         tl.pop("narration", None)
         clean = work / f"{sid}.json"
         timeline.save(tl, clean)
-        compose(clean, work / f"{sid}.mp4", with_cards=True, fade_out=False)
-        scenes.append((sid, work / f"{sid}.mp4", []))
+        compose(clean, work / f"{sid}.mp4", fade_out=False)
+        scenes.append((sid, work / f"{sid}.mp4", [], _head(reel, sid, k)))
     stitch(scenes, work / "film")
     return work / "film" / "master.mp4", said
 

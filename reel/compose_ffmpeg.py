@@ -1,6 +1,6 @@
-"""Renders a timeline with ffmpeg alone: camera moves, cuts, captions, title cards.
+"""Renders a timeline with ffmpeg alone: camera moves, cuts, captions, timer bars.
 
-Captions and cards are PNGs drawn by headless Chrome (cards.py), because this ffmpeg build may
+Captions and timer labels are PNGs drawn by headless Chrome (cards.py), because this ffmpeg build may
 lack drawtext. The camera is a zoompan over the stage scaled up 2x, so sub-pixel moves stay smooth.
 """
 from __future__ import annotations
@@ -13,10 +13,8 @@ from pathlib import Path
 from . import cards, timeline
 
 XFADE = 0.4
-MOTION_BLUR_FRAMES = 3
-LOOP_FADE = 0.4
 FADE_OUT = 0.8
-LOOP_HOLD = 0.1
+OUTPUT = {"width": 1920, "height": 1080, "fps": 30}
 CAPTION_FADE = 0.25
 
 
@@ -63,47 +61,18 @@ def _track(shots, key, fps, log=False):
     return expr.replace("T", f"(in/{fps})")
 
 
-def _window(tl: dict, start: float, end: float, with_cards: bool = False) -> dict:
-    """The timeline cut down to stage seconds start..end (a clip drops the title cards)."""
-    tl = dict(tl)
-    tl["keep"] = [[max(a, start), min(b, end)] for a, b in tl["keep"] if min(b, end) - max(a, start) > 0.05]
-    tl["captions"] = [dict(c, start=max(c["start"], start), end=min(c["end"], end))
-                      for c in tl.get("captions", []) if c["end"] > start and c["start"] < end]
-    if not with_cards:
-        tl.pop("intro", None)
-        tl.pop("outro", None)
-    return tl
+def compose(tl_path: Path, out_path: Path, fade_out: bool = True) -> Path:
+    """Renders a scene's timeline to out_path at OUTPUT size and frame rate.
 
-
-def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bool = False,
-            with_cards: bool = False, fade_out: bool = True) -> Path:
-    """Renders the timeline (or only stage seconds `window`) to out_path.
-
-    fade_out: end on a fade to black (off for a scene, which the film joins with a crossfade).
-
-    loop: the last LOOP_FADE seconds fade into the first frame, so the clip repeats without a jump.
+    fade_out: end on a fade to black (off for a scene, which a cut joins with a crossfade).
     """
     tl = timeline.load(tl_path)
-    if window:
-        tl = _window(tl, *window, with_cards=with_cards)
     base = Path(tl_path).parent
-    st, o = tl["stage"], tl["output"]
-    fps, ow, oh = o["fps"], o["width"], o["height"]
+    st = tl["stage"]
+    fps, ow, oh = OUTPUT["fps"], OUTPUT["width"], OUTPUT["height"]
     shots = tl["shots"]
     body = timeline.kept_seconds(tl["keep"])
     keep_expr = "+".join(f"between(t,{a},{b})" for a, b in tl["keep"])
-    # Motion blur only while the camera moves (Framer-style): blend a few frames, sharp when settled.
-    moves = []
-    for s0, s1 in zip(shots, shots[1:]):
-        if (s0["x"], s0["y"], s0["zoom"]) == (s1["x"], s1["y"], s1["zoom"]):
-            continue
-        a, b = timeline.output_time(tl["keep"], s0["t"]), timeline.output_time(tl["keep"], s1["t"])
-        if a is not None and b is not None and b > a:
-            moves.append((a, b))
-    # tmix must see every frame (with a timeline switch it mixes in empty, green frames), so the
-    # blurred copy runs all the time and an overlay shows it only while the camera moves.
-    weights = "1 2 1"  # centre-weighted: a hint of motion, not a ghosted double image
-    moving = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in moves)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -116,11 +85,6 @@ def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bo
             f":d=1:fps={fps}:s={ow}x{oh},"
             f"select='{keep_expr}',setpts=N/{fps}/TB,format=yuv420p,setsar=1[b0]"
         ]
-        if moves and tl.get("style", {}).get("motion_blur"):
-            g[0] = g[0].replace("[b0]", "[sharp]")
-            g.append("[sharp]split[s_keep][s_blur]")
-            g.append(f"[s_blur]tmix=frames={MOTION_BLUR_FRAMES}:weights='{weights}':scale=0.25[blurred]")
-            g.append(f"[s_keep][blurred]overlay=0:0:enable='{moving}',format=yuv420p[b0]")
         last = "b0"
         n = 1
         for i, c in enumerate(tl.get("captions", [])):
@@ -168,38 +132,9 @@ def compose(tl_path: Path, out_path: Path, window: tuple | None = None, loop: bo
                 g.append(f"[{last}][tv{k}]overlay=0:0:enable='gte(t,{done:.3f})',format=yuv420p[tvo{k}]")
                 last, n = f"tvo{k}", n + 1
 
-        offset = 0.0
-        if tl.get("intro"):
-            it = tl["intro"]
-            png = tmp / "intro.png"
-            cards.title_card(png, it["title"], it.get("subtitle", ""), tl["style"]["accent"], ow, oh)
-            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{it['seconds']:.3f}", "-i", str(png)]
-            g.append(f"[{n}:v]format=yuv420p,setsar=1[intro]")
-            g.append(f"[intro][{last}]xfade=transition=fade:duration={XFADE}:offset={it['seconds'] - XFADE:.3f}[withintro]")
-            last, n = "withintro", n + 1
-            offset = it["seconds"] - XFADE
-        if tl.get("outro"):
-            ot = tl["outro"]
-            png = tmp / "outro.png"
-            cards.title_card(png, ot["title"], ot.get("subtitle", ""), tl["style"]["accent"], ow, oh)
-            inputs += ["-loop", "1", "-framerate", str(fps), "-t", f"{ot['seconds']:.3f}", "-i", str(png)]
-            g.append(f"[{n}:v]format=yuv420p,setsar=1[outro]")
-            g.append(f"[{last}][outro]xfade=transition=fade:duration={XFADE}:offset={offset + body - XFADE:.3f}[withoutro]")
-            last, n = "withoutro", n + 1
-
-        if not loop and fade_out:
-            # The main film fades out on the whole stage instead of stopping dead (review: "ends abruptly").
-            total = body + sum(tl[k]["seconds"] - XFADE for k in ("intro", "outro") if tl.get(k))
-            g.append(f"[{last}]fade=t=out:st={max(0.0, total - FADE_OUT):.3f}:d={FADE_OUT}[faded]")
+        if fade_out:
+            g.append(f"[{last}]fade=t=out:st={max(0.0, body - FADE_OUT):.3f}:d={FADE_OUT}[faded]")
             last = "faded"
-        if loop:
-            total = body
-            g.append(f"[{last}]split[lp_a][lp_b]")
-            # The fade lands on the first frame and holds it a moment, so the last frame is the first.
-            g.append(f"[lp_b]trim=end_frame=1,loop=loop=-1:size=1,trim=duration={LOOP_FADE + LOOP_HOLD},"
-                     f"setpts=N/{fps}/TB[lp_h]")
-            g.append(f"[lp_a][lp_h]xfade=transition=fade:duration={LOOP_FADE}:offset={total - LOOP_FADE:.3f}[looped]")
-            last = "looped"
         script = tmp / "graph.txt"
         script.write_text(";\n".join(g))
         subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *inputs, "-/filter_complex", str(script),

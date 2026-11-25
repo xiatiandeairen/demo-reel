@@ -11,11 +11,9 @@ init = "source $REEL_WORK/env; cd $REEL_WORK"
 type = "cargo install --git https://github.com/xiatiandeairen/agent-build --locked agent-build"
 wait = "Installed package"
 squeeze = true  # cut the middle of the compile, keep its start and end
-focus = "full"
 say = "Install it with Cargo."
 hold = 0.5
 
 [[step]]
-focus = "full"
 say = "Then put agb in front of xcodebuild."
 hold = 1.0

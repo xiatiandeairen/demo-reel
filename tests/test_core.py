@@ -11,12 +11,10 @@ W, H = 2880, 1620
 def good_timeline():
     return {
         "stage": {"path": "stage.mp4", "width": W, "height": H, "duration": 20.0, "fps": 15},
-        "output": {"width": 1920, "height": 1080, "fps": 30},
         "keep": [[0, 8], [12, 20]],
         "shots": [{"t": 0, "x": 1440, "y": 810, "zoom": 1.0},
                   {"t": 2, "x": 720, "y": 405, "zoom": 2.0}],
         "captions": [{"start": 1, "end": 4, "text": "Two agents start the same build"}],
-        "intro": {"seconds": 1.5, "title": "aq", "subtitle": "a queue"},
     }
 
 
@@ -35,7 +33,6 @@ class TimelineValidation(unittest.TestCase):
             "overlapping keep": (lambda d: d["keep"].append([5, 9]), "before the previous part ends"),
             "keep past the end": (lambda d: d["keep"].__setitem__(1, [12, 25]), "is not inside"),
             "caption backwards": (lambda d: d["captions"][0].update(end=0.5), "captions[0]"),
-            "intro without title": (lambda d: d["intro"].pop("title"), "intro: missing 'title'"),
         }
         for name, (breaker, message) in broken.items():
             with self.subTest(name):
@@ -123,6 +120,14 @@ class CameraPlan(unittest.TestCase):
         self.assertLessEqual(cam["x"] - half_w, TOP_LEFT[0] + 1)  # left edge of the pane stays in view
         self.assertGreaterEqual(cam["x"] + half_w, line[2] - W / SMALL_W)
 
+    # CASE-B2.1: framing a pane of the right column shows none of the left column's pane (no half words).
+    def test_view_stays_inside_the_framed_pane(self):
+        right = (1907, 219, 3701, 1025)          # the top-right pane of the aq grid (stage pixels)
+        cam = motion.frame((1907, 300, 3252, 420), 3840, 2160, 2.5, within=right)
+        half_w = 3840 / cam["zoom"] / 2
+        self.assertGreaterEqual(cam["x"] - half_w, right[0] - motion.EDGE)
+        self.assertLessEqual(cam["x"] + half_w, right[2] + motion.EDGE)
+
     # CASE-B2
     def test_film_ends_on_the_whole_stage(self):
         act = activity_with([(1, 4, TOP_LEFT)])
@@ -130,15 +135,6 @@ class CameraPlan(unittest.TestCase):
         self.assertEqual(shots[-1]["zoom"], 1.0)
         self.assertGreater(len(shots), 3)
 
-    # CASE-B2
-    def test_main_film_ends_on_full_even_when_later_steps_zoom_in(self):
-        act = activity_with([(1, 4, TOP_LEFT), (6, 9, BOTTOM_RIGHT)])
-        beats = [Beat(1, 5, focus=[TOP_LEFT]), Beat(5, 9, focus=[BOTTOM_RIGHT])]
-        shots, _ = motion.plan(beats, act, 10, end_full_at=5.0)
-        before_end = [s for s in shots if s["t"] <= 5.0]
-        self.assertEqual(before_end[-1]["zoom"], 1.0)  # still on the whole stage when the film ends
-
-    # CASE-B7.1
     def test_narrated_seconds_are_never_cut(self):
         act = activity_with([(1, 2, TOP_LEFT), (8, 9, TOP_LEFT)], seconds=10)
         _, keep = motion.plan([Beat(0.5, 10, focus=[TOP_LEFT], protect=6.0)], act, 10)

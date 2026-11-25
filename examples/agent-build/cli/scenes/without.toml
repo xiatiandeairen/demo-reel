@@ -17,7 +17,6 @@ keep_files = ["log"]  # read by the results card as {files:without}/log
 
 [[step]]
 type = "cd ../app-feature"
-focus = "full"
 say = "This app was built once already."
 hold = 0.3
 
@@ -25,13 +24,11 @@ hold = 0.3
 type = "xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator' -derivedDataPath ../dd > ../log 2>&1"
 wait = '(?m)^\$ *$'  # back at an empty prompt: the build has finished
 timer = "xcodebuild"
-focus = "full"
 say = "A new worktree still starts from zero."
 hold = 0.5
 
 [[step]]
 type = "wc -l ../log"
 wait = '\d+ \.\./log'
-focus = "full"
 say = "Hundreds of lines of log, every time."
 hold = 1.5

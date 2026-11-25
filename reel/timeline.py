@@ -49,10 +49,6 @@ def validate(data: dict) -> None:
     w, h, dur = (_need(stage, k, "stage") for k in ("width", "height", "duration"))
     if w <= 0 or h <= 0 or dur <= 0:
         raise TimelineError("stage: width, height and duration must be positive")
-    out = _need(data, "output", "timeline")
-    for k in ("width", "height", "fps"):
-        if _need(out, k, "output") <= 0:
-            raise TimelineError(f"output: {k} must be positive")
 
     keep = _need(data, "keep", "timeline")
     if not keep:
@@ -88,16 +84,9 @@ def validate(data: dict) -> None:
         if not text.strip():
             raise TimelineError(f"captions[{i}]: empty text")
 
-    for key in ("intro", "outro"):
-        card = data.get(key)
-        if card is not None:
-            if _need(card, "seconds", key) <= 0:
-                raise TimelineError(f"{key}: seconds must be positive")
-            _need(card, "title", key)
-
 
 def output_time(keep: list, t: float) -> float | None:
-    """Maps a stage time to the time after cuts (without intro); None if t was cut."""
+    """Maps a stage time to the time after cuts; None if t was cut."""
     acc = 0.0
     for a, b in keep:
         if t < a:
@@ -113,5 +102,4 @@ def kept_seconds(keep: list) -> float:
 
 
 def total_seconds(data: dict) -> float:
-    extra = sum(data[k]["seconds"] for k in ("intro", "outro") if data.get(k))
-    return kept_seconds(data["keep"]) + extra
+    return kept_seconds(data["keep"])

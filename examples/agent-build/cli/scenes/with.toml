@@ -10,7 +10,6 @@ keep_files = ["log"]  # read by the results card as {files:with}/log
 
 [[step]]
 type = "cd ../app-fix"
-focus = "full"
 say = "With agb, every worktree shares one warm slot."
 hold = 0.3
 
@@ -18,6 +17,5 @@ hold = 0.3
 type = "agb xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator' 2>&1 | tee ../log"
 wait = "agb: ok"
 timer = "agb"
-focus = "full"
 say = "Seconds, and a five-line report."
 hold = 1.5
