@@ -1,20 +1,19 @@
-"""Platform files from a master video.
+"""Platform files from the cuts (docs/design.md).
 
-    x.mp4       X timeline: 1920x1080 H.264, yuv420p, faststart (plays muted, autoplay)
-    readme.mp4  GitHub README video: 1280x720 H.264, under the GIF/video cap
-    readme.gif  GitHub README GIF: tried at falling quality until it fits the cap
+    share.mp4   X and YouTube: 1920x1080 H.264 High, yuv420p, faststart (X plays it muted, autoplay)
+    readme.mp4  the README video: 1280x720 H.264, under GitHub's 10 MB
+    <name>.gif  the README GIF: tried at falling quality until it fits 10 MB; written into the project's
+                assets/ only after the checks pass (cli.py)
 
 Limits (checked 2026-11-21): GitHub images, GIFs and videos on free plans 10 MB
-(docs.github.com/.../attaching-files); X GIF 15 MB (docs.x.com/x-api/media/quickstart/best-practices).
-A spec can lower `gif_max_mb` (for example 5 for a plugin directory that is stricter).
+(docs.github.com/.../attaching-files); YouTube's recommended upload settings: MP4, H.264 High Profile, 4:2:0
+(support.google.com/youtube/answer/1722171).
 """
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
-from . import paths
 
 GIF_LADDER = [  # (width, fps, colors)
     (1120, 15, 128),
@@ -24,6 +23,7 @@ GIF_LADDER = [  # (width, fps, colors)
     (720, 10, 64),
 ]
 MB = 1024 * 1024
+GIF_CAP = 10 * MB
 
 
 def _ff(*args):
@@ -58,24 +58,14 @@ def _video(src: Path, dst: Path, width: int | None, crf: int):
         "-profile:v", "high", "-movflags", "+faststart", *audio, str(dst))
 
 
-def export(out: Path, spec: dict | None) -> Path:
-    """out/x.mp4, readme.mp4, readme.gif for the main film; out/clips/<name>.mp4 and .gif for
-    each feature clip. Narration, if any, stays on the mp4s; GIFs are silent by nature."""
-    out = Path(out)
-    master = out / "master.mp4"
-    dst = paths.deliverables(out)
+def export(cuts: dict, dst: Path) -> dict:
+    """share.mp4 and readme.mp4 in dst, and the GIF as dst/pending.gif; cuts: {cut: its master.mp4}.
+    Returns {deliverable: {"path", "cut", "tries"?}}."""
+    dst = Path(dst)
     dst.mkdir(parents=True, exist_ok=True)
-    gif_cap = int(float((spec or {}).get("gif_max_mb", 10)) * MB)
-    _video(master, dst / "x.mp4", None, 20)
-    _video(master, dst / "readme.mp4", 1280, 26)
-    tries = {"readme.gif": gif(master, dst / "readme.gif", gif_cap)}
-    clips_src = sorted((out / "clips").glob("*.mp4")) if (out / "clips").exists() else []
-    if clips_src:
-        (dst / "clips").mkdir(exist_ok=True)
-    for src in clips_src:
-        _video(src, dst / "clips" / src.name, 1280, 24)
-        tries[f"clips/{src.stem}.gif"] = gif(src, dst / "clips" / f"{src.stem}.gif", gif_cap)
-    (dst / "export.json").write_text(json.dumps({"gif_cap_bytes": gif_cap, "gif_tries": tries}, indent=2) + "\n")
-    files = sorted(p for p in dst.rglob("*") if p.suffix in (".mp4", ".gif"))
-    print(f"exported {dst}: " + ", ".join(f"{p.relative_to(dst)} {p.stat().st_size / MB:.1f} MB" for p in files))
-    return dst
+    _video(cuts["share"], dst / "share.mp4", None, 20)
+    _video(cuts["readme"], dst / "readme.mp4", 1280, 26)
+    tries = gif(cuts["gif"], dst / "pending.gif", GIF_CAP)
+    return {"share.mp4": {"path": str(dst / "share.mp4"), "cut": "share"},
+            "readme.mp4": {"path": str(dst / "readme.mp4"), "cut": "readme"},
+            "gif": {"path": str(dst / "pending.gif"), "cut": "gif", "tries": tries}}

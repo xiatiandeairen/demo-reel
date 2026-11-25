@@ -1,0 +1,50 @@
+# Each agent borrows its own simulator with aq. sim-open (from setup-sims.sh) runs
+# `xcrun simctl openurl <simulator> <agent's page>` and waits until it is on screen; agent A's is the first
+# simulator held, B's the second. sim-find (the devices' find) gets Safari ready on each once it is held.
+kind = "terminal"
+reset = "bash scripts/teardown.sh $REEL_WORK; bash scripts/setup-sims.sh $REEL_WORK"  # give back what the last run borrowed, then rebuild
+
+[terminal]
+workdir = "/tmp/aq-demo-borrow"
+init = "source $REEL_WORK/env; cd $REEL_WORK/app"
+
+[[pane]]
+name = "agent A"
+[[pane]]
+name = "agent B"
+
+[[device]]
+name = "agent A's simulator"
+find = "source $REEL_WORK/env; sim-find 1"
+[[device]]
+name = "agent B's simulator"
+find = "source $REEL_WORK/env; sim-find 2"
+
+[[step]]
+pane = "agent A"
+type = "aq hold ios-sim"
+focus = "full"
+wait = '"held"'
+say = "Each agent borrows its own simulator."
+hold = 0.5
+[[step]]
+pane = "agent A"
+type = "sim-open A"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
+focus = "full"
+wait = "Agent A's page is up"
+hold = 2.5
+[[step]]
+pane = "agent B"
+type = "aq hold ios-sim"
+focus = "full"
+wait = '"held"[\s\S]*"held"'
+hold = 0.5
+[[step]]
+pane = "agent B"
+type = "sim-open B"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
+focus = "full"
+wait = "Agent B's page is up"
+say = "Nobody steps on anyone."
+hold = 3.5

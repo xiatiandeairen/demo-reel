@@ -1,0 +1,15 @@
+# The smallest reel: one terminal scene and a card counted from what it wrote. Fast to record, so the
+# integration cases and a first try of demo-reel use it.
+lang = "en"
+
+[share]
+scenes = ["hello", "result"]
+[readme]
+scenes = ["hello"]
+[gif]
+scene = "hello"
+
+[card.result]
+lines = ["Lines written: {lines}"]
+[card.result.values]
+lines = "wc -l < {files:hello}/out.txt | tr -d ' '"

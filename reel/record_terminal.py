@@ -67,6 +67,8 @@ import time
 from pathlib import Path
 
 W, H = 3840, 2160  # 2x the output, so a 3x zoom is only a 1.5x upscale
+COLS, ROWS = 200, 50  # tmux size, the same for the rehearsal and the take so lines wrap alike
+PROMPT = "$ "
 MARGIN, PADDING, BAR = 107, 32, 80
 FPS = 15
 TYPING_MS = 45
@@ -133,45 +135,37 @@ def record(spec: dict, out: Path) -> Path:
         raise RecordError("devices need Xcode's xcrun")
     term_w, _ = device_rects(len(devices))
     out = Path(out).resolve()
-    # The demo runs in a neutral directory: paths printed on screen must not show your home folder.
-    work = Path(term.get("workdir", f"/tmp/reel-{_slug(spec['title'])}"))
-    if not str(work.resolve()).startswith(("/tmp/", "/private/tmp/")):
-        raise RecordError(f"workdir must be under /tmp, since it is wiped before each recording: {work}")
-    if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True)
+    # The demo runs where the agent prepared it; reel's own files go to a scratch folder in the scene's
+    # state, so nothing of reel's shows up when the demo lists its directory.
+    work = workdir(spec)
+    if not work.is_dir():
+        raise RecordError(f"workdir {work} does not exist: the agent prepares it (or the scene's reset does)")
+    scratch = out.parent / "tmp"
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
     sock = f"reel{os.getpid()}"
     env = {**os.environ, "REEL_WORK": str(work), "LANG": os.environ.get("LANG", "en_US.UTF-8"),
            "BASH_SILENCE_DEPRECATION_WARNING": "1"}
-
-    if term.get("setup"):
-        setup = Path(spec["_dir"]) / term["setup"]
-        r = subprocess.run([bash, str(setup), str(work)], env=env, cwd=spec["_dir"])
-        if r.returncode != 0:
-            if term.get("teardown"):  # give back whatever the setup borrowed before it failed
-                subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env, cwd=spec["_dir"])
-            raise RecordError(f"setup {term['setup']} exited with {r.returncode}")
-    work.mkdir(parents=True, exist_ok=True)
-    log = work / "events.log"
+    log = scratch / "events.log"
     log.write_text("")
 
     from . import cards
-    cards.background(work / "bg.png", spec["accent"], W, H)
+    cards.background(scratch / "bg.png", spec["accent"], W, H)
     if devices:
-        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(work / "bg.png"), "-vf",
-                        f"crop={term_w}:{H}:0:0", str(work / "bg-term.png")], check=True)
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(scratch / "bg.png"), "-vf",
+                        f"crop={term_w}:{H}:0:0", str(scratch / "bg-term.png")], check=True)
 
-    rc = write_rc(work, term, log)
-    mark = work / "mark.sh"
+    rc = write_rc(scratch, work, term, log)
+    mark = scratch / "mark.sh"
     mark.write_text(f"""#!{bash}
 printf '%s mark - -\\n' "$EPOCHREALTIME" >> {shlex.quote(str(log))}
 n=$(grep -c ' mark ' {shlex.quote(str(log))})
 tmux -L {sock} set -g status-right "#[fg=colour$(( n % 2 ? {MARK_ON} : {MARK_OFF} ))]{MARK_GLYPH}"
 # tmux only redraws the status line on its own schedule; draw it now, or the flip shows up late.
 for c in $(tmux -L {sock} list-clients -F '#{{client_name}}'); do tmux -L {sock} refresh-client -S -t "$c"; done
-if [[ ! -f {shlex.quote(str(work / "geometry"))} ]]; then
-  tmux -L {sock} display -p '#{{window_width}} #{{window_height}}' > {shlex.quote(str(work / "geometry"))}
-  tmux -L {sock} list-panes -F '#{{pane_index}} #{{pane_left}} #{{pane_top}} #{{pane_width}} #{{pane_height}}' >> {shlex.quote(str(work / "geometry"))}
+if [[ ! -f {shlex.quote(str(scratch / "geometry"))} ]]; then
+  tmux -L {sock} display -p '#{{window_width}} #{{window_height}}' > {shlex.quote(str(scratch / "geometry"))}
+  tmux -L {sock} list-panes -F '#{{pane_index}} #{{pane_left}} #{{pane_top}} #{{pane_width}} #{{pane_height}}' >> {shlex.quote(str(scratch / "geometry"))}
 fi
 """)
     mark.chmod(0o755)
@@ -182,7 +176,7 @@ fi
     subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True)
     # Panes log their index (names may contain spaces); _events maps it back to the name.
     shell = lambda name: f"REEL_PANE={names.index(name)} {bash} --rcfile {shlex.quote(str(rc))} -i"
-    tmux("new-session", "-d", "-s", "reel", "-x", "200", "-y", "50", shell(names[0]))
+    tmux("new-session", "-d", "-s", "reel", "-c", str(work), "-x", str(COLS), "-y", str(ROWS), shell(names[0]))
     # The status line carries only the step marker (bottom right): a cell that flips between two dark
     # greys at each step, so the video itself says when each step started (see _mark_times).
     tmux("set", "-g", "status", "on", ";", "set", "-g", "status-style", "bg=default", ";",
@@ -193,8 +187,8 @@ fi
     if len(names) > 1:
         tmux("set", "-g", "pane-border-status", "top", ";", "set", "-g", "pane-border-format", " #{pane_title} ")
     for name in names[1:]:
-        tmux("split-window", "-t", "reel", shell(name))
-        tmux("select-layout", "-t", "reel", term.get("layout", "tiled"))
+        tmux("split-window", "-t", "reel", "-c", str(work), shell(name))
+        tmux("select-layout", "-t", "reel", term["layout"])
     ids = subprocess.run(["tmux", "-L", sock, "list-panes", "-t", "reel", "-F", "#{pane_id}"],
                          capture_output=True, text=True, check=True, env=env).stdout.split()
     for pid, p in zip(ids, panes):
@@ -206,31 +200,27 @@ fi
     tmux("bind", "M", "run-shell", str(mark))
     tmux("select-pane", "-t", ids[0])
 
-    tape = _tape(spec, term, names, work, sock, term_w)
-    (work / "demo.tape").write_text(tape)
-    recorders = _DeviceRecorders(devices, work, env, bash)
+    tape = _tape(spec, term, names, scratch, sock, term_w)
+    (scratch / "demo.tape").write_text(tape)
+    recorders = _DeviceRecorders(devices, scratch, env, bash)
     try:
         recorders.start()
-        r = subprocess.run(["vhs", str(work / "demo.tape")], env=env, cwd=work,
+        r = subprocess.run(["vhs", str(scratch / "demo.tape")], env=env, cwd=scratch,
                            capture_output=True, text=True)
     finally:
         recorders.stop()
         subprocess.run(["tmux", "-L", sock, "kill-server"], capture_output=True)
-        td = None
-        if term.get("teardown"):
-            td = subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env,
-                                cwd=spec["_dir"], capture_output=True, text=True)
     marks = [float(l.split()[0]) for l in log.read_text().splitlines() if " mark " in l]
     if r.returncode == 0 and term.get("keep_files"):
         keep_files(work, out, term["keep_files"])
-    if r.returncode == 0 and td is not None and td.returncode != 0:
-        raise RecordError(f"teardown failed: {(td.stderr or td.stdout).strip()}")
     if r.returncode != 0:
         failed = max(0, len(marks) - 1)  # marks: 1 before Show, then one per started step
         detail = (r.stderr or r.stdout).strip().splitlines()[-3:]
         raise RecordError(f"step {failed} failed: {steps[failed - 1].get('wait') and 'waited for ' + repr(steps[failed - 1]['wait']) + ': ' or ''}"
                           + " / ".join(detail))
-    return _events(spec, panes, steps, work, out, recorders.takes, term_w)
+    path = _events(spec, panes, steps, scratch, out, recorders.takes, term_w)
+    shutil.rmtree(scratch, ignore_errors=True)
+    return path
 
 
 class _DeviceRecorders:
@@ -293,11 +283,22 @@ def keep_files(work: Path, out: Path, names: list) -> None:
         shutil.copy(src, dst)
 
 
-def write_rc(work: Path, term: dict, log: Path) -> Path:
+def beat_focus(step: dict, panes: list) -> list:
+    """What a step's camera frames: its focus, else the pane it types in, else [] (the planner decides)."""
+    focus = step.get("focus", step.get("pane", panes[0]["name"]) if step.get("type") else None)
+    return [focus] if isinstance(focus, str) else list(focus or [])
+
+
+def workdir(spec: dict) -> Path:
+    """Where a terminal scene's demo runs: [terminal] workdir, prepared by the agent (or the scene's reset)."""
+    return Path(spec.get("terminal", {}).get("workdir", f"/tmp/reel-{_slug(spec['id'])}"))
+
+
+def write_rc(scratch: Path, work: Path, term: dict, log: Path) -> Path:
     """The rc file every pane's shell starts from: the spec's init, the prompt, and a log line per command
     start and end with the pane's index and exit code (used by recording and by rehearsal)."""
-    prompt = term.get("prompt", "$ ")
-    rc = work / "reelrc"
+    prompt = PROMPT
+    rc = scratch / "reelrc"
     rc.write_text(f"""
 export BASH_SILENCE_DEPRECATION_WARNING=1 REEL_WORK={shlex.quote(str(work))}
 {term.get("init", "")}
@@ -326,7 +327,8 @@ def _slug(s: str) -> str:
 
 
 def _tape(spec, term, names, work, sock, term_w=W) -> str:
-    font = term.get("font_size", 40)
+    """The VHS tape; work is reel's scratch folder (the video and backgrounds go there)."""
+    font = term["font_size"]
     lines = [
         f'Output "{work}/stage.mp4"',
         "Require tmux",
@@ -336,8 +338,8 @@ def _tape(spec, term, names, work, sock, term_w=W) -> str:
         f"Set Padding {PADDING}", f"Set Margin {MARGIN}",
         f'Set MarginFill "{work}/{"bg.png" if term_w == W else "bg-term.png"}"',
         "Set WindowBar Colorful", f"Set WindowBarSize {BAR}", "Set BorderRadius 20",
-        f'Set Theme "{term.get("theme", "Catppuccin Mocha")}"',
-        f"Set TypingSpeed {term.get('typing_ms', TYPING_MS)}ms",
+        'Set Theme "Catppuccin Mocha"',
+        f"Set TypingSpeed {TYPING_MS}ms",
         f"Set Framerate {FPS}",
         "Set CursorBlink false",
         "Hide",
@@ -355,13 +357,12 @@ def _tape(spec, term, names, work, sock, term_w=W) -> str:
             lines += ["Ctrl+B", f'Type "{idx}"', "Sleep 0.2s"]
         if s.get("type"):
             lines.append(f"Type {_vhs_string(s['type'])}")
-            if s.get("enter", True):
-                lines += ["Sleep 0.2s", "Enter"]
+            lines += ["Sleep 0.2s", "Enter"]
         if s.get("wait"):
             rx = s["wait"].replace("/", "\\/")
-            lines.append(f"Wait+Screen@{s.get('timeout', 30)}s /{rx}/")
+            lines.append(f"Wait+Screen@{s.get('_timeout', 30)}s /{rx}/")
         # Hold at least until the step's narration has been spoken (CASE-B7.1); typing already took some.
-        typed = len(s.get("type", "")) * term.get("typing_ms", TYPING_MS) / 1000 + (0.4 if s.get("type") else 0)
+        typed = len(s.get("type", "")) * TYPING_MS / 1000 + (0.4 if s.get("type") else 0)
         hold = max(float(s.get("hold", 1.0)), s.get("_narration", 0.0) + 0.3 - typed)
         lines.append(f"Sleep {hold:.2f}s")
     # Stay visible a moment after the end mark, so its flip is in the video and the last stretch is
@@ -382,7 +383,6 @@ def _events(spec, panes, steps, work, out, takes=(), term_w=W) -> Path:
     if stage.exists():
         if stage.stat().st_size == 0:
             raise RecordError("VHS finished but wrote no video")
-        shutil.copy(work / "events.log", out / "events.log")
         shutil.move(str(stage), final)
     elif not final.exists():
         raise RecordError("VHS finished but wrote no video")
@@ -451,18 +451,15 @@ def _events(spec, panes, steps, work, out, takes=(), term_w=W) -> Path:
     for i, (s, m) in enumerate(zip(steps, step_marks)):
         start = vt(m)
         end = vt(step_marks[i + 1]) if i + 1 < len(step_marks) else duration
-        focus = s.get("focus", s.get("pane") if s.get("type") else None)
-        if isinstance(focus, str):
-            focus = [focus]
+        focus = beat_focus(s, panes)
         beats.append({"start": start, "end": round(end, 3), "label": f"step {i + 1}",
                       "focus": focus or [], "ignore": [n for n in noisy if n not in (focus or [])],
-                      "caption": s.get("caption"), "pane": s.get("pane", panes[0]["name"]),
-                      "typed": bool(s.get("type")), "allow_fail": bool(s.get("allow_fail")),
+                      "pane": s.get("pane", panes[0]["name"]),
                       "full": focus == [] or focus == ["full"], "narration": s.get("_narration", 0.0)})
 
-    # A typed command that exits non-zero fails the recording (unless the step allows it).
-    for i, b in enumerate(beats, 1):
-        if not b["typed"] or b["allow_fail"]:
+    # A typed command that exits non-zero fails the recording.
+    for i, (s, b) in enumerate(zip(steps, beats), 1):
+        if not s.get("type"):
             continue
         mine = [c for c in cmds if c["pane"] == b["pane"] and b["start"] - 0.5 <= c["start"] <= b["end"] + 0.5]
         for c in mine:

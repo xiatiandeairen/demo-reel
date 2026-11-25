@@ -1,7 +1,0 @@
-# Intro scene for film.toml: a drawn to-do list (intro.html).
-title = "todomvc intro"
-kind = "animation"
-
-[animation]
-html = "intro.html"
-seconds = 3

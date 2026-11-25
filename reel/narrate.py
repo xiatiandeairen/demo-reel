@@ -1,12 +1,13 @@
 """Presenter mode: you watch the finished film and talk over it; reel adds your camera and voice.
 
-    reel narrate <dir> [--camera 0] [--mic 0]
+    reel narrate <reel.toml> [--cut share|readme] [--camera 0] [--mic 0]
 
-1. Renders the film once without captions (your words become the captions).
+1. Renders the cut (share or readme) once without captions or narration (your words become the captions).
 2. Plays it full screen while recording camera and microphone (avfoundation), after a countdown.
 3. Transcribes what you said with mlx-whisper (local) into timed sentences.
-4. Writes out/x-presenter.mp4 and out/readme-presenter.mp4: the film, your camera in a rounded
-   window bottom right, your voice at -16 LUFS, and your sentences as captions.
+4. Writes <cut>-presenter.mp4 next to the deliverables: the film, your camera in a rounded window bottom
+   right, your voice at -16 LUFS, and your sentences as captions. The raw takes stay in the reel's state
+   (presenter/<cut>/), so the picture can be redone without talking again.
 
 The terminal that runs it needs Camera and Microphone permission (macOS asks the first time).
 """
@@ -31,15 +32,25 @@ COUNTDOWN = 3
 FACE_ROOM = 2.2  # window height as a multiple of the face height
 
 
-def _clean_master(out: Path) -> Path:
-    """The main film (its [film] range, if any) without captions, from the same timeline."""
-    tl = timeline.load(out / "timeline.json")
-    tl["captions"] = []
-    clean_tl = out / "timeline-nocaptions.json"
-    timeline.save(tl, clean_tl)
-    dst = out / "master-nocaptions.mp4"
-    compose(clean_tl, dst, window=tuple(tl["film"]) if tl.get("film") else None, with_cards=True)
-    return dst
+def _clean_master(reel: dict, cut: str, work: Path) -> tuple:
+    """(film without captions or narration, its captions' text): every scene of the cut composed again
+    from its edit's timeline with the captions taken out, then joined like the cut."""
+    from .film import stitch
+    scenes, said = [], []
+    for sid in reel["cuts"][cut]:
+        ed = paths.edit_dir(reel, sid)
+        if not (ed / "timeline.json").exists():
+            raise RuntimeError(f"scene {sid} has no edit yet: run reel make first")
+        tl = timeline.load(ed / "timeline.json")
+        said += [c["text"] for c in tl.get("captions", [])]
+        tl["captions"] = []
+        tl.pop("narration", None)
+        clean = work / f"{sid}.json"
+        timeline.save(tl, clean)
+        compose(clean, work / f"{sid}.mp4", with_cards=True, fade_out=False)
+        scenes.append((sid, work / f"{sid}.mp4", []))
+    stitch(scenes, work / "film")
+    return work / "film" / "master.mp4", said
 
 
 def _mic_bin() -> Path:
@@ -222,29 +233,31 @@ def _compose(film: Path, raw: Path, offset: float, segs: list, dst: Path,
     return dst
 
 
-def narrate(out: Path, camera: str = "0", mic: str = "0") -> list:
-    out = Path(out)
-    film = _clean_master(out)
+def narrate(reel: dict, cut: str = "share", camera: str = "0", mic: str = "0") -> list:
+    out = paths.state_dir(reel) / "presenter" / cut
+    out.mkdir(parents=True, exist_ok=True)
+    film, said = _clean_master(reel, cut, out)
     raw = out / "presenter-raw.mov"
     wav = out / "presenter-raw.wav"
     print("Watch the film and talk over it. It plays full screen; press q to stop early.")
     offset, audio_offset = _record(film, raw, wav, camera, mic)
     (out / "presenter-offset.json").write_text(json.dumps({"video": round(offset, 3), "audio": round(audio_offset, 3)}) + "\n")
     # Product names ("aq" came out as "Ack") are hinted with the film's own words.
-    tl = timeline.load(out / "timeline.json")
-    hint = " ".join([tl.get("intro", {}).get("title", "")] + [c["text"] for c in tl.get("captions", [])]).strip()
-    segs = _transcribe(wav, audio_offset, hint)
+    segs = _transcribe(wav, audio_offset, " ".join(said).strip())
     (out / "presenter-captions.json").write_text(json.dumps(segs, indent=2, ensure_ascii=False) + "\n")
-    dst = paths.deliverables(out)
+    dst = paths.data_dir(reel)
     dst.mkdir(parents=True, exist_ok=True)
-    x = _compose(film, raw, offset, segs, dst / "x-presenter.mp4", audio=wav, audio_offset=audio_offset)
-    readme = dst / "readme-presenter.mp4"
-    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(x), "-vf", "scale=1280:-2:flags=lanczos",
-                    "-c:v", "libx264", "-crf", "26", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart",
-                    str(readme)], check=True)
-    print(f"presenter version: {x} and {readme} ({len(segs)} sentences)")
+    made = _compose(film, raw, offset, segs, dst / f"{cut}-presenter-full.mp4", audio=wav, audio_offset=audio_offset)
+    final = dst / f"{cut}-presenter.mp4"
+    width = [] if cut == "share" else ["-vf", "scale=1280:-2:flags=lanczos"]
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(made), *width, "-c:v", "libx264",
+                    "-crf", "20" if cut == "share" else "26", "-profile:v", "high", "-pix_fmt", "yuv420p",
+                    "-c:a", "copy", "-movflags", "+faststart", str(final)], check=True)
+    made.unlink()
+    print(f"presenter version: {final} ({len(segs)} sentences)")
     return segs
 
 
 if __name__ == "__main__":
-    narrate(Path(sys.argv[1]))
+    from . import spec
+    narrate(spec.load(sys.argv[1]))

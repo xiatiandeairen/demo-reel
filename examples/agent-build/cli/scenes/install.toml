@@ -1,0 +1,21 @@
+# Installing agb with cargo, into a throwaway CARGO_HOME (reset: setup-install.sh). After reel make the agent
+# runs scripts/teardown-install.sh, which fails if your own agb changed. The compile in the middle is squeezed out.
+kind = "terminal"
+reset = "bash scripts/setup-install.sh $REEL_WORK"
+
+[terminal]
+workdir = "/tmp/agb-demo-install"
+init = "source $REEL_WORK/env; cd $REEL_WORK"
+
+[[step]]
+type = "cargo install --git https://github.com/xiatiandeairen/agent-build --locked agent-build"
+wait = "Installed package"
+squeeze = true  # cut the middle of the compile, keep its start and end
+focus = "full"
+say = "Install it with Cargo."
+hold = 0.5
+
+[[step]]
+focus = "full"
+say = "Then put agb in front of xcodebuild."
+hold = 1.0

@@ -1,14 +1,14 @@
-"""Where reel keeps things, following the XDG base directories; nothing is written next to reel.toml.
+"""Where reel keeps things, following the XDG base directories (docs/design.md, "流程和存储").
 
-    $XDG_STATE_HOME/demo-reel/<reel>/   recording, events, timeline, narration, masters, presenter takes:
-                                        what `reel plan` / `compose` reuse instead of recording again
-    $XDG_DATA_HOME/demo-reel/<reel>/    deliverables: x.mp4, readme.mp4/.gif, clips/, presenter versions,
-                                        check.json, sheet.png
-    $XDG_CACHE_HOME/demo-reel/          voice and transcription environment, voice clips, models, helpers
+    $XDG_STATE_HOME/demo-reel/<reel>/   scenes/<id>/rehearsal.json, take/, edit/; cuts/<cut>/; presenter/
+    $XDG_DATA_HOME/demo-reel/<reel>/    share.mp4, readme.mp4, presenter versions, report.json, sheets, leaks/
+    $XDG_CACHE_HOME/demo-reel/          voice clips, voice and transcription environments, models, helpers
     $XDG_CONFIG_HOME/demo-reel/         private.txt (your own sensitive-text patterns)
+    <project>/assets/<name>.gif         the README GIF
 
-Defaults: ~/.local/state, ~/.local/share, ~/.cache, ~/.config. <reel> is the spec's folder and file name plus
-a short hash of its path (aq-install-6ed752), so two specs never share a directory.
+Defaults: ~/.local/state, ~/.local/share, ~/.cache, ~/.config. <reel> is the project's folder name, the
+reel's name and a short hash of the reel's path (agent-quay-cli-7cb4f8): readable, and distinct per
+worktree, since each worktree's path differs.
 """
 from __future__ import annotations
 
@@ -41,38 +41,34 @@ def _slug(s: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in s.lower()).strip("-") or "demo"
 
 
-def reel_name(spec: dict) -> str:
-    """<folder>-<file>-<hash of the spec's path>, e.g. aq-install-6ed752: readable at a glance and
-    distinct per spec. The title is only what cards show (a scene titled "aq" for its outro card would
-    otherwise share a readable name with the main film)."""
-    p = Path(spec["_path"])
-    return f"{_slug(p.parent.name)}-{_slug(p.stem)}-{hashlib.sha1(spec['_path'].encode()).hexdigest()[:6]}"
+def reel_name(reel: dict) -> str:
+    h = hashlib.sha1(reel["_path"].encode()).hexdigest()[:6]
+    return f"{_slug(Path(reel['project']).name)}-{_slug(reel['name'])}-{h}"
 
 
-def state_dir(spec: dict) -> Path:
-    return state_root() / reel_name(spec)
+def state_dir(reel: dict) -> Path:
+    return state_root() / reel_name(reel)
 
 
-def deliverables(state: Path) -> Path:
-    """The deliverables directory that belongs to a reel's state directory."""
-    return data_root() / Path(state).name
+def scene_dir(reel: dict, sid: str) -> Path:
+    return state_dir(reel) / "scenes" / sid
 
 
-def orphans(state: Path | None = None, data: Path | None = None) -> list:
-    """State and output directories whose spec no longer exists (or never recorded which spec made them),
-    and output directories with no state directory (CASE-D6.1). `reel gc` lists them; `reel gc --yes`
-    deletes them."""
-    state, data = Path(state or state_root()), Path(data or data_root())
-    gone = []
-    for st in sorted(state.iterdir()) if state.exists() else []:
-        if not st.is_dir() or st.name.startswith("_"):
-            continue
-        spec_txt = st / "spec.txt"
-        if not spec_txt.exists() or not Path(spec_txt.read_text().strip()).exists():
-            gone.append(st)
-            if (data / st.name).exists():
-                gone.append(data / st.name)
-    for dd in sorted(data.iterdir()) if data.exists() else []:
-        if dd.is_dir() and not (state / dd.name).exists():
-            gone.append(dd)
-    return gone
+def take_dir(reel: dict, sid: str) -> Path:
+    return scene_dir(reel, sid) / "take"
+
+
+def edit_dir(reel: dict, sid: str) -> Path:
+    return scene_dir(reel, sid) / "edit"
+
+
+def cut_dir(reel: dict, cut: str) -> Path:
+    return state_dir(reel) / "cuts" / cut
+
+
+def data_dir(reel: dict) -> Path:
+    return data_root() / reel_name(reel)
+
+
+def gif_path(reel: dict) -> Path:
+    return Path(reel["project"]) / "assets" / f"{reel['name']}.gif"

@@ -1,0 +1,18 @@
+kind = "terminal"
+reset = "bash scripts/reset.sh"
+
+[terminal]
+workdir = "/tmp/reel-hello"
+keep_files = ["out.txt"]
+
+[[step]]
+type = "seq 3 | tee out.txt"
+wait = "3"
+say = "Count to three."
+hold = 1.0
+
+[[step]]
+type = "wc -l out.txt"
+wait = "3 out.txt"
+say = "Three lines, written to a file."
+hold = 1.5

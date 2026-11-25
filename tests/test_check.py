@@ -20,7 +20,20 @@ FAKE_SK = "sk-" + "x9Y" * 9
 class SensitiveText(unittest.TestCase):
     # CASE-A4.1
     def test_secrets_and_home_paths_are_found(self):
-        pats = check.patterns({"private": [r"\.corp\.example\b"]})
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as cfg:
+            (Path(cfg) / "demo-reel").mkdir()
+            (Path(cfg) / "demo-reel" / "private.txt").write_text("# company hosts\n\\.corp\\.example\\b\n")
+            old = os.environ.get("XDG_CONFIG_HOME")
+            os.environ["XDG_CONFIG_HOME"] = cfg
+            try:
+                pats = check.patterns()
+            finally:
+                if old is None:
+                    os.environ.pop("XDG_CONFIG_HOME")
+                else:
+                    os.environ["XDG_CONFIG_HOME"] = old
         for line, kind in [
             (f"export GITHUB_TOKEN={FAKE_GH}", "GitHub token"),
             (f"OPENAI_API_KEY={FAKE_SK}", "API key"),

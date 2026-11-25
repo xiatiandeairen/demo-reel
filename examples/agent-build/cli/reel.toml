@@ -1,0 +1,30 @@
+# agb's reel: every new worktree builds from scratch; the same build without and with agb (timer bars on
+# one scale), the measured result, then how to install. The GIF is main: agb in front of xcodebuild.
+# Real xcodebuild runs on agent-build's sample app; AGB_REPO and AGB_BIN_DIR come from the environment
+# (see scripts/setup.sh).
+lang = "en"
+narrate = true
+
+[share]
+scenes = ["result", "problem", "without", "name", "with", "result", "install", "outro"]
+[readme]
+scenes = ["problem", "without", "with", "result", "install", "outro"]
+[gif]
+scene = "main"
+
+[card.result]
+[[card.result.bars]]
+title = "First build in a new worktree"
+unit = "s"
+items = [{ label = "xcodebuild", value = { scene = "without", timer = "xcodebuild" } },
+         { label = "agb", value = { scene = "with", timer = "agb" } }]
+[[card.result.bars]]
+title = "Lines of output"
+items = [{ label = "xcodebuild", value = "wc -l < {files:without}/log | tr -d ' '" },
+         { label = "agb", value = "wc -l < {files:with}/log | tr -d ' '" }]
+
+[card.name]
+lines = ["agb", "Warm builds for every worktree"]
+
+[card.outro]
+lines = ["Try agb", "github.com/xiatiandeairen/agent-build"]

@@ -1,0 +1,38 @@
+# iOS on a real iPhone (case A6): the system Calculator, which shows no personal data.
+# Needs the AGENT_DEVICE_IOS_* signing variables in the environment (see reel/record_ios.py).
+kind = "ios"
+
+[ios]
+app = "com.apple.calculator"
+device = "$REEL_IPHONE"   # the iPhone's UDID, set by the agent
+settle = false      # keys react at once; waiting for quiet made each press take ~3 s
+
+# Button labels follow the phone's language; these are a Chinese-language iPhone's.
+[[step]]
+click = 'label="全部清除"'
+say = "Start from zero"
+hold = 0.4
+
+[[step]]
+click = 'label="1"'
+say = "Twelve"
+hold = 0.4
+
+[[step]]
+click = 'label="2"'
+hold = 0.4
+
+[[step]]
+click = 'label="乘"'
+say = "Times three"
+hold = 0.4
+
+[[step]]
+click = 'label="3"'
+hold = 0.4
+
+[[step]]
+click = 'label="等于"'
+wait = 'value="36"'
+say = "12 x 3 = 36"
+hold = 1.5

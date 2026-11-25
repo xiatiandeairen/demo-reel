@@ -1,4 +1,6 @@
-"""Checks exported files before anyone sees them: platform limits, first frame, sensitive text.
+"""Checks the deliverables before anyone sees them: only what an AI reviewing the contact sheets cannot
+see (docs/problem-model.md, goal 5): file sizes, format and length, sensitive text, narration loudness,
+and that each deliverable comes from its latest cut.
 
 Sensitive text is found by OCR (macOS Vision, tools/ocr.swift) on frames every half second.
 Your own extra patterns (company domains, internal hosts) go in
@@ -29,7 +31,7 @@ SECRETS = [
 ]
 
 
-def patterns(spec: dict | None) -> list:
+def patterns(spec: dict | None = None) -> list:
     pats = list(SECRETS)
     user = getpass.getuser()
     if len(user) >= 3:
@@ -39,8 +41,6 @@ def patterns(spec: dict | None) -> list:
         for line in private.read_text().splitlines():
             if line.strip() and not line.startswith("#"):
                 pats.append(("private pattern", line.strip()))
-    for p in (spec or {}).get("private", []):
-        pats.append(("private pattern", p))
     return [(name, re.compile(rx, re.I if name != "API key" else 0)) for name, rx in pats]
 
 
@@ -72,33 +72,11 @@ def ocr(images: list) -> dict:
 
 def probe(path: Path) -> dict:
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                        "stream=codec_name,pix_fmt,width,height:format=duration", "-of", "json", str(path)],
+                        "stream=codec_name,profile,pix_fmt,width,height:format=duration", "-of", "json", str(path)],
                        capture_output=True, text=True, check=True)
     d = json.loads(r.stdout)
     s = d["streams"][0]
     return {**s, "duration": float(d["format"]["duration"])}
-
-
-def _first_frame_spread(path: Path) -> float:
-    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(path), "-frames:v", "1", "-vf",
-                          "scale=96:54,format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
-    mean = sum(raw) / len(raw)
-    return (sum((v - mean) ** 2 for v in raw) / len(raw)) ** 0.5
-
-
-CLIP_SECONDS = (4, 15)
-LOOP_GAP_MAX = 6.0  # mean gray-level difference (0-255) between a clip's first and last frame
-
-
-def _gray(path: Path, where: list) -> bytes:
-    return subprocess.run(["ffmpeg", "-loglevel", "error", *where, "-i", str(path), "-frames:v", "1", "-vf",
-                           "scale=96:54,format=gray", "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
-
-
-def loop_gap(path: Path) -> float:
-    """How far a clip's last frame is from its first (CASE-B6.1): near 0 means it loops cleanly."""
-    a, b = _gray(path, []), _gray(path, ["-sseof", "-0.05"])
-    return sum(abs(x - y) for x, y in zip(a, b)) / max(len(a), 1)
 
 
 def loudness(path: Path) -> float | None:
@@ -109,65 +87,64 @@ def loudness(path: Path) -> float | None:
     return float(m[-1]) if m and "Audio" in r.stderr else None
 
 
-def check(out: Path, spec: dict | None) -> dict:
-    out = Path(out)
-    d = paths.deliverables(out)
-    spec = spec or {}
-    max_s = float(spec.get("max_seconds", 30))
-    gif_cap = float(spec.get("gif_max_mb", 10)) * MB
+LIMITS = {"share": 90, "readme": 90, "gif": 30}   # seconds (docs/problem-model.md, 交付物)
+
+
+def sensitive(videos: list, pats: list, leaks_dir: Path) -> list:
+    """OCR hits in every video, each with a screenshot in leaks_dir."""
+    leaks = []
+    for video in videos:
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(video), "-vf", f"fps=1/{OCR_EVERY}",
+                            f"{tmp}/f%04d.png"], check=True)
+            for path, lines in ocr(sorted(Path(tmp).glob("f*.png"))).items():
+                hits = find_sensitive(lines, pats)
+                if hits:
+                    t = (int(Path(path).stem[1:]) - 1) * OCR_EVERY
+                    shot = leaks_dir / f"{Path(video).stem}-{t:05.1f}.png"
+                    shot.parent.mkdir(parents=True, exist_ok=True)
+                    Path(path).replace(shot)
+                    leaks.append({"video": Path(video).name, "t": t, "hits": hits, "screenshot": str(shot)})
+    return leaks
+
+
+def check(made: dict, gif_cut: Path, stamps: dict, narrated: bool, leaks_dir: Path) -> list:
+    """[{name, ok, detail}] for the deliverables `made` (export's result). gif_cut: the GIF's cut video,
+    read for sensitive text; stamps: {cut: its current stamp}, each deliverable's made-from stamp is in made."""
     results = []
 
     def add(name, ok, detail):
         results.append({"name": name, "ok": bool(ok), "detail": detail})
 
-    x = probe(d / "x.mp4")
-    add("x.mp4 format", x["codec_name"] == "h264" and x["pix_fmt"] == "yuv420p"
-        and (x["width"], x["height"]) == (1920, 1080), f"{x['codec_name']} {x['pix_fmt']} {x['width']}x{x['height']}")
-    add("length", x["duration"] <= max_s + 0.05, f"{x['duration']:.1f} s (limit {max_s:.0f} s)")
-    rm = probe(d / "readme.mp4")
-    rm_size = (d / "readme.mp4").stat().st_size
-    add("readme.mp4", rm["codec_name"] == "h264" and rm["pix_fmt"] == "yuv420p" and rm_size <= 10 * MB,
-        f"{rm['width']}x{rm['height']} {rm_size / MB:.1f} MB (limit 10 MB)")
-    all_tries = json.loads((d / "export.json").read_text())["gif_tries"]
-    for name, tries in all_tries.items():
-        g = (d / name).stat().st_size
-        add(f"{name} size", g <= gif_cap, f"{g / MB:.1f} MB (limit {gif_cap / MB:.0f} MB); tried "
-            + ", ".join(f"{t['width']}px/{t['fps']}fps/{t['colors']}c={t['bytes'] / MB:.1f}MB" for t in tries))
-    for clip in sorted((d / "clips").glob("*.mp4")) if (d / "clips").exists() else []:
-        c = probe(clip)
-        add(f"clips/{clip.name} length", CLIP_SECONDS[0] <= c["duration"] <= CLIP_SECONDS[1],
-            f"{c['duration']:.1f} s (want {CLIP_SECONDS[0]}-{CLIP_SECONDS[1]} s)")
-        diff = loop_gap(clip)
-        add(f"clips/{clip.name} loops", diff <= LOOP_GAP_MAX, f"first vs last frame differ by {diff:.1f} (limit {LOOP_GAP_MAX})")
-    if spec.get("voice"):
-        lufs = loudness(d / "x.mp4")
-        add("narration loudness", lufs is not None and abs(lufs + 16) <= 2,
-            "no audio track" if lufs is None else f"{lufs:.1f} LUFS (target -16 ± 2)")
-    spread = _first_frame_spread(d / "x.mp4")
-    add("first frame", spread > 8, f"contrast {spread:.0f} (a blank frame is near 0)")
-
-    pats = patterns(spec)
-    leaks = []
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(d / "x.mp4"), "-vf", f"fps=1/{OCR_EVERY}",
-                        f"{tmp}/f%04d.png"], check=True)
-        frames = sorted(Path(tmp).glob("f*.png"))
-        for path, lines in ocr(frames).items():
-            hits = find_sensitive(lines, pats)
-            if hits:
-                t = (int(Path(path).stem[1:]) - 1) * OCR_EVERY
-                shot = d / "leaks" / f"t{t:05.1f}.png"
-                shot.parent.mkdir(exist_ok=True)
-                Path(path).replace(shot)
-                leaks.append({"t": t, "hits": hits, "screenshot": str(shot)})
-    add("sensitive text", not leaks,
-        "none found" if not leaks else "; ".join(f"{l['t']:.1f}s {h[0]} {h[1]!r}" for l in leaks for h in l["hits"]))
-    report = {"ok": all(r["ok"] for r in results), "dir": str(d), "checks": results, "leaks": leaks}
-    (d / "check.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    return report
+    share, readme, gif = (Path(made[k]["path"]) for k in ("share.mp4", "readme.mp4", "gif"))
+    s, r = probe(share), probe(readme)
+    sizes = {"readme.mp4": readme.stat().st_size, "GIF": gif.stat().st_size}
+    tries = ", ".join(f"{t['width']}px/{t['fps']}fps={t['bytes'] / MB:.1f}MB" for t in made["gif"]["tries"])
+    add("size", all(v <= 10 * MB for v in sizes.values()),
+        " · ".join(f"{k} {v / MB:.1f} / 10 MB" for k, v in sizes.items()) + (f" (tried {tries})" if len(made["gif"]["tries"]) > 1 else ""))
+    g = probe(gif)
+    fmt_ok = (s["codec_name"] == "h264" and s.get("profile") == "High" and s["pix_fmt"] == "yuv420p"
+              and (s["width"], s["height"]) == (1920, 1080) and r["codec_name"] == "h264")
+    long = [f"{n} {d:.1f} / {LIMITS[c]} s" for n, c, d in (("share.mp4", "share", s["duration"]),
+            ("readme.mp4", "readme", r["duration"]), ("GIF", "gif", g["duration"]))]
+    add("format", fmt_ok and s["duration"] <= LIMITS["share"] + 0.05 and r["duration"] <= LIMITS["readme"] + 0.05
+        and g["duration"] <= LIMITS["gif"] + 0.05,
+        f"share.mp4 {s['codec_name']} {s.get('profile')} {s['width']}x{s['height']} · " + " · ".join(long))
+    pats = patterns(None)
+    leaks = sensitive([share, readme, gif_cut], pats, leaks_dir)
+    add("sensitive", not leaks, "none found" if not leaks else
+        "; ".join(f"{l['video']} at {l['t']:.1f} s: {h[0]} {h[1]!r} ({l['screenshot']})" for l in leaks for h in l["hits"]))
+    if narrated:
+        lufs = {n: loudness(v) for n, v in (("share.mp4", share), ("readme.mp4", readme))}
+        add("loudness", all(v is not None and abs(v + 16) <= 2 for v in lufs.values()),
+            " · ".join(f"{n} {'no audio' if v is None else f'{v:.1f} LUFS'}" for n, v in lufs.items()) + " (target -16 ± 2)")
+    stale = [n for n, m in made.items() if stamps.get(m["cut"]) != m.get("cut_stamp")]
+    add("fresh", not stale, "each deliverable is from its latest cut" if not stale else
+        f"{', '.join(stale)} not made from the latest cut: run reel make again")
+    return results
 
 
-def print_report(report: dict):
-    print(f"check: {'PASS' if report['ok'] else 'FAIL'}  ({report['dir']})")
-    for r in report["checks"]:
-        print(f"  {'ok ' if r['ok'] else 'BAD'} {r['name']}: {r['detail']}")
+def print_report(results: list):
+    print("CHECKS")
+    for r in results:
+        print(f"  {'ok  ' if r['ok'] else 'FAIL'}  {r['name']:<10}{r['detail']}")

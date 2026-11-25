@@ -1,0 +1,5 @@
+# A drawn to-do list (intro.html) that opens the reel.
+kind = "animation"
+
+[animation]
+html = "intro.html"

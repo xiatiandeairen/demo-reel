@@ -83,11 +83,11 @@ def _step_command(step: dict, beat: dict, commands: list) -> dict | None:
 
 
 def keep_spans(steps: list, beats: list, commands: list) -> list:
-    """Stage spans that must play uncut (CASE-D1.1): the whole run of commands in steps marked
-    `keep_time = true` or `timer`, so a comparison of durations is shown in real time."""
+    """Stage spans that must play uncut (CASE-D1.1): the whole run of commands in steps with a `timer`,
+    so a comparison of durations is shown in real time."""
     spans = []
     for s, b in zip(steps, beats):
-        if s.get("type") and (s.get("keep_time") or s.get("timer")):
+        if s.get("type") and s.get("timer"):
             c = _step_command(s, b, commands)
             if c:
                 spans.append((round(c["start"], 3), round(c["end"], 3)))
@@ -104,6 +104,35 @@ def add_spans(keep: list, spans: list) -> list:
         else:
             out.append([a, b])
     return out
+
+
+def timer_scale(runs: list) -> float:
+    """Seconds a full timer bar stands for: the longest timed run of the whole reel, rounded up, so bars in
+    different scenes compare directly (CASE-D1.2). runs: seconds of every timed command."""
+    import math
+    return float(max(1, math.ceil(max(runs, default=10.0))))
+
+
+def timed_runs(spec: dict, take: Path) -> list:
+    """Seconds of each timed command in a scene's take."""
+    ev = json.loads((Path(take) / "events.json").read_text())
+    return [i["seconds"] for i in timer_items(spec.get("step", []), ev["beats"], ev.get("commands", []), 1.0)]
+
+
+def captions_for(steps: list, beats: list) -> list:
+    """One caption per step with `say`, shown until the next step with `say` starts: a step without it
+    keeps the previous sentence on screen, so a muted viewer always has a caption (CASE-E3). A step with
+    the `key` verb ends its caption with that key's keycap (CASE-B5)."""
+    caps = []
+    for s, b in zip(steps, beats):
+        if s.get("say"):
+            c = {"start": round(min(b["start"] + 0.2, b["end"] - 0.1), 3), "end": round(b["end"], 3), "text": s["say"]}
+            caps.append(c)
+        elif caps:
+            caps[-1]["end"] = round(b["end"], 3)
+        if s.get("key") and caps:
+            caps[-1]["keys"] = str(s["key"]).lower()
+    return caps
 
 
 def timer_items(steps: list, beats: list, commands: list, scale: float) -> list:
@@ -157,22 +186,30 @@ def cut_spans(keep: list, spans: list) -> list:
     return out
 
 
-def plan(spec: dict, out: Path) -> Path:
-    out = Path(out)
-    ev = json.loads((out / "events.json").read_text())
+def plan(spec: dict, take: Path, edit: Path, scale: float = 10.0) -> Path:
+    """edit/timeline.json from a scene's take (stage video + events.json) and its script."""
+    take, edit = Path(take), Path(edit)
+    edit.mkdir(parents=True, exist_ok=True)
+    ev = json.loads((take / "events.json").read_text())
     if ev.get("device_sync"):
         from .record_terminal import composite_devices
-        composite_devices(out, spec["accent"])  # rebuilt from the kept sources: layout changes need no new recording
-    st = ev["stage"]
+        composite_devices(take, spec["accent"])  # rebuilt from the kept sources: layout changes need no new take
+    st = {**ev["stage"], "path": str(take / ev["stage"]["path"])}
     regions = ev.get("regions", {})
     rect = lambda name: tuple(regions[name]) if name in regions else None
-    act = motion.Activity.from_video(str(out / st["path"]), st["width"], st["height"])
+    act = motion.Activity.from_video(st["path"], st["width"], st["height"])
     if ev.get("kind") == "terminal" and ev.get("sync", {}).get("method") != "marks":
         ev = refine(ev, act)  # only without the on-screen marker: anchors are a rougher fallback
-        (out / "events.refined.json").write_text(json.dumps(ev, indent=2, ensure_ascii=False) + "\n")
-    else:
-        (out / "events.refined.json").unlink(missing_ok=True)
 
+    steps = spec.get("step", [])
+    if ev.get("kind") == "terminal":
+        # The camera follows the script as it is now: focus is an editing field, changed without a new take.
+        from .record_terminal import beat_focus
+        noisy = [p["name"] for p in spec["pane"] if p.get("noisy")]
+        for s, b in zip(steps, ev["beats"]):
+            b["focus"] = beat_focus(s, spec["pane"])
+            b["ignore"] = [n for n in noisy if n not in b["focus"]]
+            b["full"] = b["focus"] in ([], ["full"])
     beats = []
     for b in ev["beats"]:
         beats.append(motion.Beat(
@@ -184,81 +221,42 @@ def plan(spec: dict, out: Path) -> Path:
     # Pages and windows are framed from what changed, cursor included: keep more context there.
     # A portrait phone already fills the stage's height; zooming in would cut it off.
     # A Mac window is already scaled to fill the stage; zooming cut off its toolbar and edges.
-    max_zoom = {"terminal": motion.MAX_ZOOM, "ios": 1.0, "mac": 1.0}.get(ev.get("kind"), 1.6)
-    # The main film can be a range of steps ([film] from/to); later steps then only feed clips.
-    film = spec.get("film")
-    film_window = None
-    if film:
-        a, z = int(film.get("from", 1)), int(film.get("to", len(ev["beats"])))
-        film_window = [0.0 if a == 1 else round(ev["beats"][a - 1]["start"] - 0.3, 3), round(ev["beats"][z - 1]["end"], 3)]
+    max_zoom = {"terminal": motion.MAX_ZOOM, "ios": 1.0, "android": 1.0, "mac": 1.0}.get(ev.get("kind"), 1.6)
+    cmds = ev.get("commands", [])
     if ev.get("kind") in ("animation", "card"):
         # Drawn full-frame and timed by their author: no camera moves, nothing cut.
         shots = [{"t": 0.0, "x": st["width"] / 2, "y": st["height"] / 2, "zoom": 1.0}]
         keep = [[0.0, st["duration"]]]
     else:
-        shots, keep = motion.plan(beats, act, st["duration"], max_zoom,
-                                  end_full_at=film_window[1] if film_window else None)
-        steps, cmds = spec.get("step", []), ev.get("commands", [])
+        shots, keep = motion.plan(beats, act, st["duration"], max_zoom)
         keep = cut_spans(keep, squeeze_spans(steps, ev["beats"], cmds))
         keep = add_spans(keep, keep_spans(steps, ev["beats"], cmds))
-
-    # One narration sentence per step: `say`, else `caption`; `keys` adds keycaps after it.
-    captions = []
-    steps = spec.get("step", [])
-    for i, b in enumerate(ev["beats"]):
-        s = steps[i] if i < len(steps) else {}
-        text = s.get("say") or s.get("caption") or b.get("caption")
-        if text:
-            c = {"start": round(min(b["start"] + 0.2, b["end"] - 0.1), 3), "end": round(b["end"], 3), "text": text}
-            if s.get("keys"):
-                c["keys"] = s["keys"]
-            captions.append(c)
 
     data = {
         "stage": st,
         "output": {"width": 1920, "height": 1080, "fps": 30},
-        # Motion blur is opt-in: frame blending ghosts text on fast zooms (2026-11-22 review).
-        "style": {"accent": spec["accent"], "kind": ev["kind"], "motion_blur": bool(spec.get("motion_blur"))},
+        "style": {"accent": spec["accent"], "kind": ev["kind"]},
         "keep": keep,
         "shots": shots,
-        "captions": captions,
+        "captions": captions_for(steps, ev["beats"]),
     }
-    timers = timer_items(spec.get("step", []), ev["beats"], ev.get("commands", []), float(spec.get("timer_scale", 10)))
+    timers = timer_items(steps, ev["beats"], cmds, scale)
     if timers:
         data["timers"] = timers
-    # Narration: each step's synthesised sentence, starting with its caption (see voice.py).
-    narration = []
-    for i, b in enumerate(ev["beats"], 1):
-        wav = out / "voice" / f"step{i:02d}.wav"
-        if spec.get("voice") and wav.exists():
-            narration.append({"wav": str(wav.relative_to(out)), "start": round(b["start"] + 0.2, 3)})
+    # Narration: each step's synthesised sentence (cached clip), starting with its caption (see voice.py).
+    narration = [{"wav": s["_narration_wav"], "start": round(b["start"] + 0.2, 3)}
+                 for s, b in zip(steps, ev["beats"]) if spec.get("voice") and s.get("_narration_wav")]
     if narration:
         data["narration"] = narration
-    if film_window:
-        data["film"] = film_window
-    # Feature clips: [[clip]] name, from, to (step numbers), cut from the same recording.
-    clips = []
-    for c in spec.get("clip", []):
-        a, z = int(c["from"]), int(c["to"])
-        if not (1 <= a <= z <= len(ev["beats"])):
-            raise ValueError(f"clip {c.get('name')!r}: steps {a}..{z} are outside 1..{len(ev['beats'])}")
-        clips.append({"name": c["name"], "start": round(max(0.0, ev["beats"][a - 1]["start"] - 0.3), 3),
-                      "end": round(ev["beats"][z - 1]["end"], 3)})
-    if clips:
-        data["clips"] = clips
-    # The references open on the product itself; title cards are opt-in.
-    if spec.get("intro"):
-        data["intro"] = {"seconds": INTRO_SECONDS, "title": spec["title"], "subtitle": spec.get("subtitle", "")}
-    if spec.get("outro"):
-        data["outro"] = {"seconds": OUTRO_SECONDS, "title": spec["title"], "subtitle": spec.get("url", "")}
-    path = out / "timeline.json"
+    path = edit / "timeline.json"
     timeline.save(data, path)
     return path
 
 
-def sync_report(out: Path) -> list:
-    """For each typed step: logged command start vs the first visible change in its pane (CASE-A2.1)."""
-    out = Path(out)
+def sync_report(take: Path) -> list:
+    """For each typed step: logged command start vs the first visible change in its pane (CASE-A2.1).
+    A developer's check (scripts/dev.py sync); not part of reel make."""
+    out = Path(take)
     ev = json.loads((out / "events.json").read_text())
     st = ev["stage"]
     act = motion.Activity.from_video(str(out / st["path"]), st["width"], st["height"])
@@ -273,13 +271,12 @@ def sync_report(out: Path) -> list:
     return rows
 
 
-def framing_report(out: Path) -> list:
+def framing_report(take: Path, edit: Path) -> list:
     """Per step: share of the changes (outside ignored panes) that fall inside the camera's view
     once it has arrived (CASE-A2). 1.0 means the camera saw everything that moved."""
-    out = Path(out)
-    ev = json.loads(((out / "events.refined.json") if (out / "events.refined.json").exists()
-                     else (out / "events.json")).read_text())
-    tl = timeline.load(out / "timeline.json")
+    out = Path(take)
+    ev = json.loads((out / "events.json").read_text())
+    tl = timeline.load(Path(edit) / "timeline.json")
     st = ev["stage"]
     act = motion.Activity.from_video(str(out / st["path"]), st["width"], st["height"])
     regions = ev.get("regions", {})

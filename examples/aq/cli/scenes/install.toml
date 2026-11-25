@@ -1,0 +1,25 @@
+# Installing. brew prints "already installed" on a Mac that has aq; the plugin is really installed,
+# into a throwaway Claude Code config (reset: setup-install.sh). After reel make the agent runs
+# scripts/teardown-install.sh, which fails if your own plugin list changed.
+kind = "terminal"
+reset = "bash scripts/setup-install.sh $REEL_WORK"
+
+[terminal]
+workdir = "/tmp/aq-demo-install"
+init = "export CLAUDE_CONFIG_DIR=$REEL_WORK/claude HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1; cd $REEL_WORK"
+
+[[step]]
+type = "brew install xiatiandeairen/tap/aq"
+wait = "already installed|Pouring|Installing"
+say = "Install with Homebrew."
+hold = 1.0
+[[step]]
+type = "claude plugin marketplace add xiatiandeairen/agent-quay"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
+wait = "Added marketplace"
+say = "Add the Claude Code plugin."
+hold = 0.3
+[[step]]
+type = "claude plugin install agent-quay@agent-quay"
+wait = '✔[\s\S]*✔'  # the second check mark: marketplace added, then plugin installed
+hold = 1.5

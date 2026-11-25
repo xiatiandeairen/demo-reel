@@ -1,0 +1,9 @@
+lang = "en"
+accent = ["#3a3f4b", "#6b7a8f"]
+
+[share]
+scenes = ["main"]
+[readme]
+scenes = ["main"]
+[gif]
+scene = "main"

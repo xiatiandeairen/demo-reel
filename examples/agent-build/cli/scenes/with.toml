@@ -1,0 +1,23 @@
+# With agb. "app" was built once with agb (setup-agb.sh), so its slot is warm; a new worktree
+# builds incrementally in that slot. The timer bar shares its scale with scene 2.
+kind = "terminal"
+reset = "bash scripts/setup-agb.sh $REEL_WORK"
+
+[terminal]
+workdir = "/tmp/agb-demo-with"
+init = "source $REEL_WORK/env; cd $REEL_WORK/app"
+keep_files = ["log"]  # read by the results card as {files:with}/log
+
+[[step]]
+type = "cd ../app-fix"
+focus = "full"
+say = "With agb, every worktree shares one warm slot."
+hold = 0.3
+
+[[step]]
+type = "agb xcodebuild build -scheme App -destination 'generic/platform=iOS Simulator' 2>&1 | tee ../log"
+wait = "agb: ok"
+timer = "agb"
+focus = "full"
+say = "Seconds, and a five-line report."
+hold = 1.5

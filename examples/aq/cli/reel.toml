@@ -1,0 +1,29 @@
+# aq's reel: the problem, three agents without and with aq, borrowing simulators, the measured result,
+# then how to install. The agent prepares nothing by hand: each scene's reset (scripts/) rebuilds its
+# demo under /tmp before the rehearsal and before the take; teardown*.sh return what the demo borrowed.
+# Recorded from the aq installed on PATH (AQ_BIN_DIR, if set, comes first; see scripts/setup.sh).
+lang = "en"
+narrate = true
+
+[share]
+scenes = ["result", "problem", "without", "name", "with", "borrow", "result", "install", "outro"]
+[readme]
+scenes = ["problem", "without", "with", "borrow", "result", "install", "outro"]
+[gif]
+scene = "with"
+
+# build.sh appends "<start> <end>" to runs.log on every real run; each scene keeps its log
+# (keep_files), so these figures are counted from the recordings, never typed in.
+[card.result]
+lines = ["Builds run: {runs_without} → {runs_with}", "Build time: {secs_without} s → {secs_with} s"]
+[card.result.values]
+runs_without = "wc -l < {files:without}/runs.log | tr -d ' '"
+runs_with = "wc -l < {files:with}/runs.log | tr -d ' '"
+secs_without = "awk '{ s += $2 - $1 } END { print s }' {files:without}/runs.log"
+secs_with = "awk '{ s += $2 - $1 } END { print s }' {files:with}/runs.log"
+
+[card.name]
+lines = ["aq", "A local queue and device lender for parallel AI agents"]
+
+[card.outro]
+lines = ["Try aq", "github.com/xiatiandeairen/agent-quay"]

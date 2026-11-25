@@ -1,9 +1,6 @@
-"""Narration: one spoken sentence per step, from the step's `speak`, else `say` (or `caption`).
+"""Narration: one spoken sentence per step that has `say`, when the reel sets narrate = true.
 
-    [voice]
-    engine = "kokoro"        # local and free; runs on Apple Silicon through mlx-audio
-    voice = "am_michael"     # am_michael (US male) or bf_emma (UK female) passed the listening test
-    speed = 1.0
+The voice follows the reel's lang (spec.VOICES); Kokoro runs locally on Apple Silicon through mlx-audio.
 
 Kokoro lives in its own virtual environment (~/.cache/demo-reel/tts-venv), created on first use
 with uv, so its dependencies never touch the project. Clips are cached by text, voice and speed.
@@ -73,21 +70,17 @@ def synth(text: str, cfg: dict, cache: Path) -> Path:
     return wav
 
 
-def prepare(spec: dict, out: Path) -> None:
+def prepare(spec: dict) -> None:
     """Synthesises every step's sentence before recording and stores its length on the step as
-    `_narration`, so recorders hold each step until its sentence has been spoken (CASE-B7.1)."""
+    `_narration` (and the cached clip as `_narration_wav`), so recorders hold each step until its sentence
+    has been spoken (CASE-B7.1). Clips stay in the cache; nothing is copied into the reel's state."""
     cfg = spec.get("voice")
     if not cfg:
         return
     cache = paths.cache_root() / "voice"
-    for i, s in enumerate(spec["step"], 1):
-        # `speak` spells out what the voice should say when the caption's spelling would mislead it.
-        text = s.get("speak") or s.get("say") or s.get("caption")
-        if not text:
+    for s in spec["step"]:
+        if not s.get("say"):
             continue
-        wav = synth(text, cfg, cache)
-        dst = out / "voice" / f"step{i:02d}.wav"
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(wav, dst)
-        s["_narration"] = round(duration(dst), 3)
-        s["_narration_wav"] = str(dst)
+        wav = synth(s["say"], cfg, cache)
+        s["_narration"] = round(duration(wav), 3)
+        s["_narration_wav"] = str(wav)

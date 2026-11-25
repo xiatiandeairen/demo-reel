@@ -1,0 +1,57 @@
+# The same three agents without aq. build.sh is a stand-in for a heavy build (see setup.sh);
+# sim-open (from setup-sims.sh) runs `xcrun simctl openurl <simulator> <agent's page>`, and here every
+# agent uses the one simulator borrowed before recording.
+kind = "terminal"
+reset = "bash scripts/teardown.sh $REEL_WORK; bash scripts/setup-shared.sh $REEL_WORK"  # give back what the last run borrowed, then rebuild
+
+[terminal]
+workdir = "/tmp/aq-demo-without"
+keep_files = ["runs.log"]  # read by the results card as {files:without}/runs.log
+init = "source $REEL_WORK/env; cd $REEL_WORK/app"
+
+[[pane]]
+name = "agent A"
+[[pane]]
+name = "agent B"
+[[pane]]
+name = "agent C"
+
+[[device]]
+name = "the only simulator"
+find = "cat $REEL_WORK/sim"
+
+[[step]]
+pane = "agent A"
+type = "./build.sh"
+focus = "full"
+say = "Every agent builds alone."
+hold = 0.2
+[[step]]
+pane = "agent B"
+type = "./build.sh"
+focus = "full"
+hold = 0.2
+[[step]]
+pane = "agent C"
+type = "./build.sh"
+focus = "full"
+hold = 0.5
+[[step]]
+pane = "agent A"
+type = "sim-open A"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
+focus = "full"
+wait = "Agent A's page is up"
+say = "And they fight over one simulator."
+hold = 2.5
+[[step]]
+pane = "agent B"
+type = "sim-open B"
+squeeze = true  # cut the middle of the wait (page loading, cloning) even though the screen moves
+focus = "full"
+wait = "Agent B's page is up"
+hold = 3.0
+[[step]]
+focus = "full"
+wait = 'succeeded[\s\S]*succeeded[\s\S]*succeeded'
+hold = 0.5

@@ -1,25 +1,23 @@
-"""A card scene: a few large lines of text, with figures computed from what other scenes logged.
+"""A card: a few large lines of text, or bar charts, with figures computed from what the scenes logged.
 
-Spec fields for kind = "card":
+Cards are written in reel.toml (docs/design.md):
 
-    [card]
-    seconds = 4
+    [card.result]
     lines = ["Builds run: {without} → {with}"]
-    [card.values]                 # each value is the output of a shell command (run in the spec's folder);
-                                  # {files:<scene>.toml} is the files that scene kept (its keep_files)
-    without = "wc -l < {files:without-aq.toml}/app/runs.log | tr -d ' '"
+    [card.result.values]          # each value is a shell command's output (run in the reel's folder);
+    without = "wc -l < {files:without}/runs.log | tr -d ' '"   # {files:<scene id>}: what that scene kept
 
 A card can show bar charts instead of (or below) lines: each group compares a few values, bars as
 long as their values with the largest filling the track, growing in one after another.
 
-    [[card.bars]]
+    [[card.result.bars]]
     title = "First build in a new worktree"
     unit = "s"
-    items = [{ label = "xcodebuild", value = { scene = "without-agb.toml", timer = "xcodebuild" } },
-             { label = "agb", value = "<command>" }]     # a command's output, or another scene's timer bar
+    items = [{ label = "xcodebuild", value = { scene = "without", timer = "xcodebuild" } },
+             { label = "agb", value = "<command>" }]     # a command's output, or a scene's timer bar
 
-A command that fails or prints nothing (or, for a bar, not a number) stops the film, so a card never
-shows a made-up or empty figure (CASE-C5.1, CASE-D1.3). Optional [[step]] entries (at, say) narrate it.
+A command that fails or prints nothing (or, for a bar, not a number) stops the reel, so a card never
+shows a made-up or empty figure (CASE-C5.1, CASE-D1.3). How long a card stays follows from its content.
 """
 from __future__ import annotations
 
@@ -42,22 +40,21 @@ class CardError(RuntimeError):
 FILES_REF = re.compile(r"\{files:([^}]+)\}")
 
 
-def _kept_files(cmd: str, cwd: str) -> str:
-    """{files:<scene>.toml} in a command becomes that scene's kept-files directory (CASE-D3.1)."""
-    from . import paths, spec as spec_mod
-
+def _kept_files(cmd: str, scenes: Path) -> str:
+    """{files:<scene id>} in a command becomes that scene's kept-files folder, take/files (CASE-D3.1)."""
     def sub(m):
-        scene = (Path(cwd) / m.group(1)).resolve()
-        if not scene.exists():
-            raise CardError(f"card: {m.group(1)} not found")
-        return shlex.quote(str(paths.state_dir(spec_mod.load(scene)) / "files"))
+        kept = Path(scenes) / m.group(1) / "take" / "files"
+        if not kept.exists():
+            raise CardError(f"card: scene {m.group(1)} has kept no files (keep_files), or has not been recorded")
+        return shlex.quote(str(kept))
     return FILES_REF.sub(sub, cmd)
 
 
-def values(commands: dict, cwd: str) -> dict:
+def values(commands: dict, cwd: str, scenes: Path) -> dict:
+    """Each command's output. scenes: the reel's scenes state folder (paths.state_dir(reel) / "scenes")."""
     out = {}
     for name, cmd in commands.items():
-        cmd = _kept_files(cmd, cwd)
+        cmd = _kept_files(cmd, scenes)
         r = subprocess.run(["bash", "-c", cmd], cwd=cwd, capture_output=True, text=True)
         if r.returncode != 0:
             raise CardError(f"card value {name}: `{cmd}` failed: {(r.stderr or r.stdout).strip()}")
@@ -85,29 +82,27 @@ def _number(text: str) -> float:
     return float(text.replace(",", "").strip())
 
 
-def scene_timer(scene_spec: Path, label: str) -> float:
-    """Seconds of the timer bar `label` in another scene's last recording, so a card and that bar agree."""
-    from . import paths, spec as spec_mod
-    sc = spec_mod.load(scene_spec)
-    tl = paths.state_dir(sc) / "timeline.json"
+def scene_timer(scenes: Path, sid: str, label: str) -> float:
+    """Seconds of the timer bar `label` in a scene's latest edit, so a card and that bar agree."""
+    tl = Path(scenes) / sid / "edit" / "timeline.json"
     if not tl.exists():
-        raise CardError(f"bar from {scene_spec.name}: that scene has not been recorded")
+        raise CardError(f"bar from scene {sid}: that scene has not been recorded")
     for tm in json.loads(tl.read_text()).get("timers", []):
         if tm["label"] == label:
             return float(tm["seconds"])
-    raise CardError(f"bar from {scene_spec.name}: it has no timer labelled {label!r}")
+    raise CardError(f"bar from scene {sid}: it has no timer labelled {label!r}")
 
 
-def bar_groups(groups: list, cwd: str) -> list:
+def bar_groups(groups: list, cwd: str, scenes: Path) -> list:
     """Groups with each item's value, display text and share of its group's largest value (CASE-D1.3)."""
     out = []
     for g in groups:
         items = []
         for it in g["items"]:
-            if isinstance(it["value"], dict):  # { scene = "<spec>.toml", timer = "<label>" }: the same figure as that timer bar
-                raw = f"{scene_timer(Path(cwd) / it['value']['scene'], it['value']['timer']):.1f}"
+            if isinstance(it["value"], dict):  # { scene = "<id>", timer = "<label>" }: the same figure as that timer bar
+                raw = f"{scene_timer(scenes, it['value']['scene'], it['value']['timer']):.1f}"
             else:
-                raw = values({it["label"]: it["value"]}, cwd)[it["label"]]
+                raw = values({it["label"]: it["value"]}, cwd, scenes)[it["label"]]
             try:
                 v = _number(raw)
             except ValueError:
@@ -121,10 +116,17 @@ def bar_groups(groups: list, cwd: str) -> list:
     return out
 
 
+LEAD_IN, GAP = 0.4, 0.3  # seconds before the first sentence, and between sentences
+
+
 def beats_for(steps: list, seconds: float) -> list:
-    """Narration beats for a step-less scene: each step's `at` until the next one (or the end)."""
+    """Narration beats for a scene without actions (an animation): the first sentence after LEAD_IN, each
+    next one GAP after the previous has been spoken (or read), the last until the end."""
+    ats, t = [], LEAD_IN
+    for s in steps:
+        ats.append(round(t, 3))
+        t += (s.get("_narration") or READ_BASE) + GAP
     beats = []
-    ats = [float(s.get("at", 0.0)) for s in steps]
     for i, (s, at) in enumerate(zip(steps, ats)):
         end = ats[i + 1] if i + 1 < len(ats) else seconds
         beats.append({"start": at, "end": round(end, 3), "label": f"step {i + 1}", "focus": [], "ignore": [],
@@ -143,14 +145,29 @@ def write_events(out: Path, kind: str, seconds: float, steps: list) -> Path:
     return path
 
 
-def record(spec: dict, out: Path) -> Path:
-    card = spec.get("card", {})
-    if not card.get("lines") and not card.get("bars"):
-        raise CardError("[card] needs lines or bars")
-    seconds = float(card.get("seconds", 4))
-    lines = fill(card.get("lines", []), values(card.get("values", {}), spec["_dir"]))
-    groups = bar_groups(card.get("bars", []), spec["_dir"])
+READ_LINE, READ_BASE, READ_MIN = 1.2, 1.5, 2.5  # seconds to read a card: per line, plus a base
+
+
+def card_seconds(lines: list, groups: list) -> float:
+    """How long a card stays: long enough to read its lines, and for its bars to grow and be read."""
+    read = max(READ_MIN, READ_BASE + READ_LINE * len(lines))
+    bars = sum(len(g["items"]) for g in groups)
+    grown = 0.4 + max(0, bars - 1) * BAR_STAGGER + BAR_GROW + READ_LINE * len(groups) + READ_BASE if bars else 0
+    return round(max(read, grown), 1)
+
+
+def resolve(spec: dict) -> tuple:
+    """(lines, bar groups) with every figure computed now; spec["_scenes"] is the reel's scenes state."""
+    card = spec["card"]
+    lines = fill(card.get("lines", []), values(card.get("values", {}), spec["_dir"], spec["_scenes"]))
+    return lines, bar_groups(card.get("bars", []), spec["_dir"], spec["_scenes"])
+
+
+def record(spec: dict, out: Path, resolved: tuple | None = None) -> Path:
+    lines, groups = resolved or resolve(spec)
+    seconds = card_seconds(lines, groups)
     out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
     png = out / "card.png"
     if not groups:
         cards.stat_card(png, lines, spec["accent"], W, H)

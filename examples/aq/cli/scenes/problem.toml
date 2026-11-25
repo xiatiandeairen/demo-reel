@@ -1,0 +1,8 @@
+# The problem, drawn (problem.html).
+kind = "animation"
+
+[animation]
+html = "problem.html"
+
+[[step]]
+say = "Three agents. One Mac."

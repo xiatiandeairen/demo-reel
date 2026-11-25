@@ -1,0 +1,11 @@
+# Stand-in Mac demo (case A8): the system's TextEdit. Needs an awake, unlocked display.
+# Before reel make, the agent opens TextEdit with a new, empty document in front.
+kind = "mac"
+
+[mac]
+app = "TextEdit"
+
+[[step]]
+type = ["textfield", "Recorded with demo-reel."]
+say = "Type into it"
+hold = 1.5

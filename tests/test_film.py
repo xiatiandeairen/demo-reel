@@ -1,4 +1,4 @@
-"""Unit cases for films made of scenes (docs/multi-scene.md). Run: python3 -m unittest discover tests"""
+"""Unit cases for cuts, cards and the stages of a reel (docs/design.md). Run: python3 -m unittest discover tests"""
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,35 +16,6 @@ def write(d: Path, name: str, text: str) -> Path:
 SCENE = 'title = "s"\nkind = "card"\n[card]\nlines = ["hi"]\n'
 
 
-class FilmSpec(unittest.TestCase):
-    # CASE-C6.1
-    def test_scene_paths_are_relative_to_the_film(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            d = Path(tmp)
-            (d / "sub").mkdir()
-            write(d / "sub", "a.toml", SCENE)
-            f = write(d, "film.toml", 'title = "f"\n[[scene]]\nspec = "sub/a.toml"\n')
-            s = spec.load(f)
-            self.assertEqual(s["kind"], "film")
-            self.assertEqual(s["_scenes"], [str((d / "sub" / "a.toml").resolve())])
-
-    # CASE-C6.1
-    def test_missing_scene_is_named(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            f = write(Path(tmp), "film.toml", 'title = "f"\n[[scene]]\nspec = "gone.toml"\n')
-            with self.assertRaisesRegex(spec.SpecError, "gone.toml"):
-                spec.load(f)
-
-    # CASE-C6.1
-    def test_film_inside_a_film_is_refused(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            d = Path(tmp)
-            write(d, "inner.toml", 'title = "i"\n[[scene]]\nspec = "x.toml"\n')
-            f = write(d, "film.toml", 'title = "f"\n[[scene]]\nspec = "inner.toml"\n')
-            with self.assertRaisesRegex(spec.SpecError, "inner.toml.*film"):
-                spec.load(f)
-
-
 class Stitching(unittest.TestCase):
     # CASE-C6.2
     def test_scenes_overlap_by_one_crossfade(self):
@@ -57,35 +28,22 @@ class Stitching(unittest.TestCase):
         items = film.shift_items([[("a.wav", 0.5)], [], [("b.wav", 1.0), ("c.wav", 3.0)]], [0.0, 5.6, 15.2])
         self.assertEqual(items, [("a.wav", 0.5), ("b.wav", 16.2), ("c.wav", 18.2)])
 
-    # CASE-C8
-    def test_failed_scene_is_named_and_earlier_scenes_are_kept(self):
-        made = []
-
-        def make(path):
-            if path.endswith("borrow.toml"):
-                raise RuntimeError("step 3 failed: waited for 'held'")
-            made.append(path)
-
-        with self.assertRaisesRegex(film.FilmError, r"borrow\.toml.*step 3 failed"):
-            film.make_all(["/x/problem.toml", "/x/borrow.toml", "/x/install.toml"], make)
-        self.assertEqual(made, ["/x/problem.toml"])
-
 
 class CardValues(unittest.TestCase):
     # CASE-C5.1
     def test_values_come_from_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
             write(Path(tmp), "runs.log", "1 2\n3 4\n5 6\n")
-            vals = record_card.values({"n": "wc -l < runs.log | tr -d ' '"}, tmp)
+            vals = record_card.values({"n": "wc -l < runs.log | tr -d ' '"}, tmp, Path(tmp))
             self.assertEqual(record_card.fill(["Builds run: {n} → 1"], vals), ["Builds run: 3 → 1"])
 
     # CASE-C5.1
     def test_failing_or_empty_command_stops_the_film(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(record_card.CardError, "n"):
-                record_card.values({"n": "cat missing.log"}, tmp)
+                record_card.values({"n": "cat missing.log"}, tmp, Path(tmp))
             with self.assertRaisesRegex(record_card.CardError, "empty"):
-                record_card.values({"n": "true"}, tmp)
+                record_card.values({"n": "true"}, tmp, Path(tmp))
 
     # CASE-C5.1
     def test_unknown_placeholder_is_named(self):
@@ -177,7 +135,7 @@ class BarCard(unittest.TestCase):
         from reel.record_card import bar_groups
         groups = [{"title": "First build in a new worktree", "unit": "s",
                    "items": [{"label": "xcodebuild", "value": "echo 8.4"}, {"label": "agb", "value": "echo 1.5"}]}]
-        out = bar_groups(groups, ".")
+        out = bar_groups(groups, ".", Path("."))
         self.assertEqual([round(i["share"], 3) for i in out[0]["items"]], [1.0, 0.179])
         self.assertEqual([i["text"] for i in out[0]["items"]], ["8.4 s", "1.5 s"])
 
@@ -185,7 +143,7 @@ class BarCard(unittest.TestCase):
     def test_non_numeric_value_is_refused(self):
         from reel.record_card import CardError, bar_groups
         with self.assertRaisesRegex(CardError, "xcodebuild"):
-            bar_groups([{"title": "t", "items": [{"label": "xcodebuild", "value": "echo fast"}]}], ".")
+            bar_groups([{"title": "t", "items": [{"label": "xcodebuild", "value": "echo fast"}]}], ".", Path("."))
 
 
 class KeptFiles(unittest.TestCase):
@@ -203,92 +161,103 @@ class KeptFiles(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "gone.log"):
                 keep_files(work, out, ["gone.log"])
 
-    # CASE-D3.1: a card command names another scene's kept files as {files:<scene>.toml}.
+    # CASE-D3.1: a card command names another scene's kept files as {files:<scene id>}: its take/files.
     def test_card_reads_kept_files(self):
-        import os
         with tempfile.TemporaryDirectory() as tmp:
-            d = Path(tmp)
-            write(d, "scene.toml", 'title = "s"\nkind = "card"\n[card]\nlines = ["x"]\n')
-            old = os.environ.get("XDG_STATE_HOME")
-            os.environ["XDG_STATE_HOME"] = str(d / "state")
-            try:
-                from reel import paths
-                kept = paths.state_dir(spec.load(d / "scene.toml")) / "files"
-                kept.mkdir(parents=True)
-                (kept / "runs.log").write_text("a\nb\nc\n")
-                vals = record_card.values({"n": "wc -l < {files:scene.toml}/runs.log | tr -d ' '"}, str(d))
-                self.assertEqual(vals, {"n": "3"})
-            finally:
-                if old is None:
-                    os.environ.pop("XDG_STATE_HOME")
-                else:
-                    os.environ["XDG_STATE_HOME"] = old
+            scenes = Path(tmp) / "scenes"
+            kept = scenes / "without" / "take" / "files"
+            kept.mkdir(parents=True)
+            (kept / "runs.log").write_text("a\nb\nc\n")
+            vals = record_card.values({"n": "wc -l < {files:without}/runs.log | tr -d ' '"}, tmp, scenes)
+            self.assertEqual(vals, {"n": "3"})
+            with self.assertRaisesRegex(record_card.CardError, "scene with "):
+                record_card.values({"n": "cat {files:with}/runs.log"}, tmp, scenes)
 
 
 class Rehearsal(unittest.TestCase):
     # CASE-D2.1: a rehearsal names each problem a recording would hit, before anything is recorded.
     def test_problems_are_named(self):
         from reel.rehearse import judge
-        steps = [{"type": "./build.sh"}, {"type": "xcodebuild build"}, {"type": "false", "allow_fail": True},
+        steps = [{"type": "./build.sh"}, {"type": "xcodebuild build"}, {"type": "true"},
                  {"type": "cat log", "wait": "BUILD SUCCEEDED"}]
         cmds = [{"step": 1, "cmd": "./build.sh", "exit": 2}, {"step": 2, "cmd": "xcodebuild build", "exit": None},
-                {"step": 3, "cmd": "false", "exit": 1}, {"step": 4, "cmd": "cat log", "exit": 0}]
+                {"step": 3, "cmd": "true", "exit": 0}, {"step": 4, "cmd": "cat log", "exit": 0}]
         problems = judge(steps, cmds, missed={4: "BUILD SUCCEEDED"}, leaks=[("home path", "/Users/someone")])
         text = "\n".join(problems)
         self.assertIn("step 1", text)                 # exited non-zero
         self.assertIn("step 2", text)                 # never finished
-        self.assertNotIn("step 3", text)              # allowed to fail
+        self.assertNotIn("step 3", text)              # exited 0
         self.assertIn("step 4", text)                 # wait never seen
         self.assertIn("/Users/someone", text)         # would leak
         self.assertEqual(judge(steps[:1], [{"step": 1, "cmd": "./build.sh", "exit": 0}], {}, []), [])
 
-    # CASE-D2.2: a scene's fingerprint covers its spec and every file it names, followed through scripts
-    # (setup-shared.sh -> setup-sims.sh -> setup.sh), and nothing else in the folder.
+    # CASE-D2.2: a take's fingerprint covers its scene and every reel file it names, followed through scripts
+    # (setup-shared.sh -> setup-sims.sh -> setup.sh), and nothing of another scene; editing-only fields are out.
     def test_fingerprint_follows_what_the_scene_uses(self):
-        from reel.rehearse import fingerprint
+        from reel import stamp
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)
-            write(d, "a.toml", 'setup = "setup-shared.sh"')
-            write(d, "setup-shared.sh", 'exec bash setup-sims.sh "$1" shared')
-            write(d, "setup-sims.sh", 'bash "$here/setup.sh" "$demo"')
-            write(d, "setup.sh", "echo 1")
-            write(d, "other.toml", "y")
-            first = fingerprint(d / "a.toml")
-            write(d, "other.toml", "z")                     # another scene's file
-            self.assertEqual(first, fingerprint(d / "a.toml"))
-            write(d, "setup.sh", "echo 2")                  # two scripts down
-            self.assertNotEqual(first, fingerprint(d / "a.toml"))
+            (d / "scenes").mkdir()
+            (d / "scripts").mkdir()
+            write(d / "scenes", "a.toml", 'reset = "bash scripts/setup-shared.sh"\n[[step]]\ntype = "x"\nsay = "One."\n')
+            write(d / "scripts", "setup-shared.sh", 'exec bash setup-sims.sh "$1" shared')
+            write(d / "scripts", "setup-sims.sh", 'bash "$here/setup.sh" "$demo"')
+            write(d / "scripts", "setup.sh", "echo 1")
+            write(d / "scenes", "other.toml", "y")
+            reel = {"_dir": str(d), "lang": "en"}
+            scene = {"_path": str(d / "scenes" / "a.toml"), "step": [{}]}
+            first = stamp.take(scene, reel)
+            write(d / "scenes", "other.toml", "z")                     # another scene's file
+            self.assertEqual(first, stamp.take(scene, reel))
+            write(d / "scenes", "a.toml", 'reset = "bash scripts/setup-shared.sh"\n[[step]]\ntype = "x"\nsay = "Two."\n')
+            self.assertEqual(first, stamp.take(scene, reel))           # a caption is an editing field
+            write(d / "scripts", "setup.sh", "echo 2")                  # two scripts down
+            self.assertNotEqual(first, stamp.take(scene, reel))
+            self.assertNotEqual(stamp.take(scene, reel), stamp.take({**scene, "step": [{"_narration": 2.1}]}, reel))
 
 
 class SkipUnchanged(unittest.TestCase):
-    # CASE-D5.1: a film reuses a scene's recording while its fingerprint is the one it was recorded with.
-    def test_scene_is_reused_only_when_unchanged(self):
-        from reel.film import up_to_date
+    # CASE-D5.1: a stage is reused only while it was made from the current inputs and its files are there.
+    def test_stage_is_reused_only_when_unchanged(self):
+        from reel import stamp
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            self.assertFalse(up_to_date(out, "abc"))         # never recorded
+            self.assertFalse(stamp.fresh(out, "abc", "scene.mp4"))         # never made
+            stamp.write(out, "abc")
+            self.assertFalse(stamp.fresh(out, "abc", "scene.mp4"))         # stamped but its video is gone
             (out / "scene.mp4").write_bytes(b"x")
-            (out / "recorded.json").write_text('{"fingerprint": "abc"}')
-            self.assertTrue(up_to_date(out, "abc"))
-            self.assertFalse(up_to_date(out, "def"))         # something it uses changed
+            self.assertTrue(stamp.fresh(out, "abc", "scene.mp4"))
+            self.assertFalse(stamp.fresh(out, "def", "scene.mp4"))         # something it uses changed
 
 
-class GarbageCollect(unittest.TestCase):
-    # CASE-D6.1: reel gc names state and output directories whose spec is gone, and only those.
-    def test_orphans_are_the_ones_without_a_spec(self):
-        from reel.paths import orphans
-        with tempfile.TemporaryDirectory() as tmp:
-            d = Path(tmp)
-            state, data = d / "state", d / "data"
-            write(d, "kept.toml", "x")
-            for name, spec_txt in (("kept-1", str(d / "kept.toml")), ("gone-2", str(d / "gone.toml")), ("bare-3", None)):
-                (state / name).mkdir(parents=True)
-                (data / name).mkdir(parents=True)
-                if spec_txt:
-                    (state / name / "spec.txt").write_text(spec_txt + "\n")
-            (data / "lonely-4").mkdir()
-            self.assertEqual(sorted(p.name for p in orphans(state, data)),
-                             ["bare-3", "bare-3", "gone-2", "gone-2", "lonely-4"])
+class FailedScene(unittest.TestCase):
+    # CASE-C8: a scene that fails stops the reel with its name and reason; scenes recorded before it stay.
+    def test_failed_scene_is_named_and_earlier_scenes_are_kept(self):
+        import contextlib
+        import io
+        import os
+        from reel import cli
+        root = Path(__file__).resolve().parent.parent
+        calls = []
+
+        def take(reel, sc, rerecord):
+            calls.append(sc["id"])
+            raise cli.Failed("record", sc["id"], "step 3 failed: waited for 'held'", "fix it")
+
+        old_take, old_pre = cli._take, None
+        from reel import preflight
+        old_pre = preflight.check
+        cli._take, preflight.check = take, lambda reel: [(True, "tools", "")]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = cli.make(str(root / "examples/hello/cli/reel.toml"))
+        finally:
+            cli._take, preflight.check = old_take, old_pre
+        self.assertEqual(code, 1)
+        self.assertEqual(calls, ["hello"])
+        self.assertIn("FAIL record  scene=hello", out.getvalue())
+        self.assertIn("step 3 failed", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -178,7 +178,8 @@ class PresenterCaptions(unittest.TestCase):
 
 
 class Storage(unittest.TestCase):
-    # CASE-B10: nothing is written next to reel.toml; state and deliverables follow XDG
+    # CASE-B10: a reel's state and deliverables follow XDG; the GIF goes to <project>/assets/<name>.gif;
+    # the same reel in two worktrees gets two directories.
     def test_xdg_locations_and_distinct_names(self):
         import os
         import tempfile
@@ -188,15 +189,16 @@ class Storage(unittest.TestCase):
             old = {k: os.environ.get(k) for k in ("XDG_STATE_HOME", "XDG_DATA_HOME")}
             os.environ["XDG_STATE_HOME"], os.environ["XDG_DATA_HOME"] = f"{home}/state", f"{home}/data"
             try:
-                a = {"title": "aq", "_path": "/repo-one/docs/demo/reel.toml"}
-                b = {"title": "aq", "_path": "/repo-two/docs/demo/reel.toml"}
+                a = {"name": "cli", "project": "/w/agent-quay", "_path": "/w/agent-quay/.agents/demo-reel/cli/reel.toml"}
+                b = {"name": "cli", "project": "/w/agent-quay-feat", "_path": "/w/agent-quay-feat/.agents/demo-reel/cli/reel.toml"}
                 sa, sb = paths.state_dir(a), paths.state_dir(b)
-                self.assertNotEqual(sa, sb)  # same title in two projects: two directories
-                self.assertTrue(str(sa).startswith(f"{home}/state/demo-reel/demo-reel-"))  # <folder>-<file>-<hash>
-                inst = {"title": "aq", "_path": "/repo-one/examples/aq/install.toml"}  # the title is the outro's text
-                self.assertTrue(paths.state_dir(inst).name.startswith("aq-install-"))
-                self.assertEqual(paths.deliverables(sa), Path(f"{home}/data/demo-reel") / sa.name)
-                self.assertNotIn("/repo-one", str(sa))
+                self.assertNotEqual(sa, sb)
+                self.assertTrue(sa.name.startswith("agent-quay-cli-"))
+                self.assertEqual(paths.take_dir(a, "with"), sa / "scenes" / "with" / "take")
+                self.assertEqual(paths.cut_dir(a, "share"), sa / "cuts" / "share")
+                self.assertEqual(paths.data_dir(a), Path(f"{home}/data/demo-reel") / sa.name)
+                self.assertEqual(paths.gif_path(a), Path("/w/agent-quay/assets/cli.gif"))
+                self.assertNotIn("/w/", str(sa))
             finally:
                 for k, v in old.items():
                     if v is None:

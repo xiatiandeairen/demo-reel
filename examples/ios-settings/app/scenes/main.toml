@@ -1,0 +1,21 @@
+# Stand-in iOS demo: the simulator's own Settings app (LiveTranslate has no UI yet).
+kind = "ios"
+
+[ios]
+app = "Settings"
+device = "$REEL_SIM"   # a booted simulator's UDID, set by the agent
+
+[[step]]
+click = 'text="General"'
+say = "Open General."
+hold = 1.2
+
+[[step]]
+click = 'text="About"'
+say = "Then About."
+hold = 1.5
+
+[[step]]
+back = true
+say = "And back."
+hold = 1.2

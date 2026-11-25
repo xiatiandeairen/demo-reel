@@ -1,0 +1,8 @@
+# Every new worktree starts its build from zero (problem.html).
+kind = "animation"
+
+[animation]
+html = "problem.html"
+
+[[step]]
+say = "Every new worktree builds from scratch."

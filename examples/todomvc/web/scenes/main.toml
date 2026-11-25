@@ -1,0 +1,33 @@
+# TodoMVC's vanilla JS app, served locally by scripts/setup.sh (run by the agent before reel make).
+kind = "web"
+
+[web]
+url = "http://127.0.0.1:8765/"
+
+[[step]]
+type = [".new-todo", "Record the demo"]
+say = "Add a todo."
+hold = 0.2
+
+[[step]]
+key = "Enter"
+hold = 1.2
+
+[[step]]
+type = [".new-todo", "Check every frame"]
+say = "And another one."
+hold = 0.2
+
+[[step]]
+key = "Enter"
+hold = 1.2
+
+[[step]]
+click = ".todo-list li:first-child .toggle"
+say = "Tick one off."
+hold = 1.0
+
+[[step]]
+click = "a[href='#/completed']"
+say = "Then show only what is done."
+hold = 1.5

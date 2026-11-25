@@ -1,19 +1,18 @@
 """Rehearsal: a terminal scene run once without recording, before `reel make` records it.
 
-It runs the setup, the panes and every step the way the recording will (same rc, same panes, same order
-and holds, device `find` commands polled), but types instantly and reads tmux's own screen, which stays
-current where the recorder's terminal can stall. Afterwards it names every problem a recording would hit:
-a typed command that exits non-zero, one that never finishes, a `wait` that never shows up, and sensitive
-text anywhere in the panes' output (home paths, user name, tokens, private patterns). A rehearsal that
-passed is reused while nothing the scene uses has changed (fingerprint, CASE-D2.2); set REEL_REHEARSE=always to run it
-anyway, or `[terminal] rehearse = false` to skip it for a scene.
+It runs the panes and every step the way the take will (same rc, same panes and size, same order and holds,
+device `find` commands polled), in the workdir the agent prepared (the scene's reset runs first), but
+types instantly and reads tmux's own screen, which stays current where the recorder's terminal can stall.
+Afterwards it names every problem a take would hit: a typed command that exits non-zero, one that never
+finishes, a `wait` that never shows up, and sensitive text in the panes' output (home paths, user name,
+tokens, private patterns). It also measures how long each step took: the take's timeouts follow from that.
+A rehearsal that passed is reused while the take's inputs are unchanged (reel/stamp.py).
 
 Recording a scene that fails takes minutes; a rehearsal takes the demo's own run time (2026-11-23
 dogfood: 5 of 8 recording failures would have shown up here).
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -23,31 +22,16 @@ import time
 from pathlib import Path
 
 from . import check
-from .record_terminal import RecordError, _DeviceRecorders, _bash, _slug, write_rc
+from .record_terminal import COLS, ROWS, RecordError, _DeviceRecorders, _bash, workdir, write_rc
 
 POLL = 0.25
+WAIT_LIMIT = 900   # seconds a rehearsal waits for one step (a cold Xcode build takes minutes)
+TIMEOUT_FACTOR, TIMEOUT_PAD, TIMEOUT_MIN = 3.0, 10.0, 30.0
 
 
-def fingerprint(spec_path: Path) -> str:
-    """Hash of everything a scene uses: its spec and each file in its folder that it names, followed through
-    the scripts it names (setup-shared.sh -> setup-sims.sh -> setup.sh). Editing another scene's files
-    leaves it alone (CASE-D2.2). Tools outside the folder (the demoed binary) are not covered: set
-    REEL_REHEARSE=always or REEL_RERECORD=always after changing them."""
-    spec_path = Path(spec_path).resolve()
-    folder = spec_path.parent
-    siblings = {f.name: f for f in folder.iterdir() if f.is_file() and f != spec_path}
-    used, todo = {spec_path}, [spec_path]
-    while todo:
-        text = todo.pop().read_text(errors="replace")
-        for name, f in siblings.items():
-            if f not in used and re.search(rf"(?<![\w.-]){re.escape(name)}(?![\w.-])", text):
-                used.add(f)
-                todo.append(f)
-    h = hashlib.sha1()
-    for f in sorted(used):
-        h.update(f.name.encode())
-        h.update(f.read_bytes())
-    return h.hexdigest()[:16]
+def timeout(seconds: float | None) -> float:
+    """A take's timeout for a step that took `seconds` in the rehearsal: a recording machine is busier."""
+    return round(max(TIMEOUT_MIN, (seconds or 0.0) * TIMEOUT_FACTOR + TIMEOUT_PAD), 1)
 
 
 def judge(steps: list, commands: list, missed: dict, leaks: list) -> list:
@@ -58,7 +42,7 @@ def judge(steps: list, commands: list, missed: dict, leaks: list) -> list:
         s = steps[c["step"] - 1]
         if c["exit"] is None:
             problems.append(f"step {c['step']}: `{c['cmd']}` never finished (it hangs, or needs longer than its timeout)")
-        elif c["exit"] != 0 and not s.get("allow_fail"):
+        elif c["exit"] != 0:
             problems.append(f"step {c['step']}: `{c['cmd']}` exited with {c['exit']}")
     for k, rx in sorted(missed.items()):
         problems.append(f"step {k}: waited for {rx!r}, never on screen")
@@ -77,47 +61,39 @@ def _screen(sock, pane_ids, history=False) -> str:
     return "\n".join(_tmux(sock, "capture-pane", "-p", "-J", *extra, "-t", p).stdout for p in pane_ids)
 
 
-def rehearse(spec: dict, out: Path) -> dict:
-    """Runs the scene once without recording; returns the report, raises RecordError listing the problems."""
+def rehearse(spec: dict, scene_dir: Path, stamp: str) -> dict:
+    """Runs the scene once without recording and writes scene_dir/rehearsal.json; reused while `stamp`
+    (the take's inputs) is unchanged. Raises RecordError listing the problems."""
     term = spec.get("terminal", {})
-    out = Path(out)
-    fp = fingerprint(Path(spec["_path"]))
-    prev = out / "rehearsal.json"
-    if os.environ.get("REEL_REHEARSE") != "always" and prev.exists():
+    scene_dir = Path(scene_dir)
+    prev = scene_dir / "rehearsal.json"
+    if prev.exists():
         old = json.loads(prev.read_text())
-        if old.get("fingerprint") == fp and old.get("ok"):
-            print("rehearsal: reused (nothing this scene uses changed since it passed)")
-            return old
+        if old.get("stamp") == stamp and old.get("ok"):
+            return {**old, "reused": True}
     bash = _bash()
-    panes = spec.get("pane") or [{"name": "main"}]
+    panes = spec["pane"]
     names = [p["name"] for p in panes]
     steps = spec["step"]
-    work = Path(str(term.get("workdir", f"/tmp/reel-{_slug(spec['title'])}")) + "-rehearsal")
-    if not str(work.resolve()).startswith(("/tmp/", "/private/tmp/")):
-        raise RecordError(f"workdir must be under /tmp: {work}")
-    if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True)
+    work = workdir(spec)
+    if not work.is_dir():
+        raise RecordError(f"workdir {work} does not exist: the agent prepares it (or the scene's reset does)")
+    scratch = scene_dir / "rehearse-tmp"
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
     env = {**os.environ, "REEL_WORK": str(work), "BASH_SILENCE_DEPRECATION_WARNING": "1"}
     t0 = time.monotonic()
-    if term.get("setup"):
-        r = subprocess.run([bash, str(Path(spec["_dir"]) / term["setup"]), str(work)], env=env, cwd=spec["_dir"],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            if term.get("teardown"):
-                subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env, cwd=spec["_dir"])
-            raise RecordError(f"rehearsal: setup {term['setup']} exited with {r.returncode}: "
-                              f"{(r.stderr or r.stdout).strip()[-300:]}")
-    log = work / "events.log"
+    log = scratch / "events.log"
     log.write_text("")
-    rc = write_rc(work, term, log)
+    rc = write_rc(scratch, work, term, log)
     sock = f"rehearse{os.getpid()}"
     shell = lambda name: f"REEL_PANE={names.index(name)} {bash} --rcfile {rc} -i"
     _tmux(sock, "kill-server")
-    _tmux(sock, "new-session", "-d", "-s", "r", "-x", "160", "-y", "50", shell(names[0]), check_=True)
+    _tmux(sock, "new-session", "-d", "-s", "r", "-c", str(work), "-x", str(COLS), "-y", str(ROWS), shell(names[0]),
+          check_=True)
     for name in names[1:]:
-        _tmux(sock, "split-window", "-t", "r", shell(name), check_=True)
-        _tmux(sock, "select-layout", "-t", "r", term.get("layout", "tiled"))
+        _tmux(sock, "split-window", "-t", "r", "-c", str(work), shell(name), check_=True)
+        _tmux(sock, "select-layout", "-t", "r", term["layout"])
     ids = _tmux(sock, "list-panes", "-t", "r", "-F", "#{pane_id}", check_=True).stdout.split()
     time.sleep(1.0)
     for pid, p in zip(ids, panes):
@@ -125,35 +101,32 @@ def rehearse(spec: dict, out: Path) -> dict:
             _tmux(sock, "send-keys", "-t", pid, f"clear; {p['run']}", "Enter")
     time.sleep(0.5)
     base = len(log.read_text().splitlines())  # what the panes' own `run` commands logged is not a step's
-    devices = _DeviceRecorders(spec.get("device", []), work, env, bash, record=False)
+    devices = _DeviceRecorders(spec.get("device", []), scratch, env, bash, record=False)
     devices.start()
-    missed, typed_steps = {}, []
+    missed, typed_steps, waited = {}, [], {}
     try:
         for i, s in enumerate(steps, 1):
             pane = ids[names.index(s.get("pane", names[0]))]
+            started = time.monotonic()
             if s.get("type"):
                 _tmux(sock, "send-keys", "-t", pane, "-l", s["type"])
-                if s.get("enter", True):
-                    _tmux(sock, "send-keys", "-t", pane, "Enter")
+                _tmux(sock, "send-keys", "-t", pane, "Enter")
                 typed_steps.append(i)
             if s.get("wait"):
                 rx = re.compile(s["wait"])
-                deadline = time.monotonic() + float(s.get("timeout", 30))
+                deadline = started + WAIT_LIMIT
                 while not rx.search(_screen(sock, ids)):
                     if time.monotonic() > deadline:
                         missed[i] = s["wait"]
                         break
                     time.sleep(POLL)
+                waited[i] = round(time.monotonic() - started, 1)
             time.sleep(min(float(s.get("hold", 1.0)), 2.0))
         time.sleep(0.5)
         screens = _screen(sock, ids, history=True)
     finally:
         devices.stop()
         _tmux(sock, "kill-server")
-        td = None
-        if term.get("teardown"):
-            td = subprocess.run([bash, str(Path(spec["_dir"]) / term["teardown"]), str(work)], env=env,
-                                cwd=spec["_dir"], capture_output=True, text=True)
     # Pair each typed step with the command its pane started next (in order), as the recording does.
     rows = [l.split(" ", 3) for l in log.read_text().splitlines()[base:]]
     started = [r for r in rows if r[1] == "start"]
@@ -173,15 +146,11 @@ def rehearse(spec: dict, out: Path) -> dict:
     leaks = check.find_sensitive([l for l in screens.splitlines() if l.strip()], check.patterns(spec))
     leaks = list(dict.fromkeys(leaks))
     problems = judge(steps, cmds, missed, leaks)
-    if td is not None and td.returncode != 0:
-        problems.append(f"teardown failed: {(td.stderr or td.stdout).strip()[-300:]}")
-    report = {"fingerprint": fp, "ok": not problems, "problems": problems, "commands": cmds,
-              "seconds": round(time.monotonic() - t0, 1)}
-    out.mkdir(parents=True, exist_ok=True)
+    report = {"stamp": stamp, "ok": not problems, "problems": problems, "commands": cmds,
+              "seconds": [waited.get(i) for i in range(1, len(steps) + 1)],
+              "total": round(time.monotonic() - t0, 1)}
     prev.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    shutil.rmtree(work, ignore_errors=True)
-    timing = ", ".join(f"step {c['step']} {c['seconds']} s" for c in cmds if c["seconds"] is not None)
+    shutil.rmtree(scratch, ignore_errors=True)
     if problems:
         raise RecordError("rehearsal found problems before recording:\n  " + "\n  ".join(problems))
-    print(f"rehearsal: ok in {report['seconds']} s ({timing})")
     return report

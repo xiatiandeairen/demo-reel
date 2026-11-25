@@ -1,0 +1,49 @@
+# The same agents with aq: one build for A and B, tests wait for the single heavy slot.
+# build.sh and test.sh are stand-ins for heavy builds (see setup.sh); every aq call is real.
+kind = "terminal"
+reset = "bash scripts/teardown.sh $REEL_WORK; bash scripts/setup.sh $REEL_WORK"  # give back what the last run borrowed, then rebuild
+
+[terminal]
+workdir = "/tmp/aq-demo-with"
+keep_files = ["runs.log"]  # read by the results card as {files:with}/runs.log
+init = "source $REEL_WORK/env; cd $REEL_WORK/app"
+
+[[pane]]
+name = "agent A"
+[[pane]]
+name = "agent C"
+[[pane]]
+name = "agent B"
+[[pane]]
+name = "aq status --top"
+run = "aq status --top"
+
+[[step]]
+focus = "agent A"
+pane = "agent A"
+type = "aq run -- ./build.sh"
+say = "With aq, the same build runs once."
+hold = 0.5
+[[step]]
+focus = "agent B"
+pane = "agent B"
+type = "aq run -- ./build.sh"
+hold = 0.5
+[[step]]
+focus = "agent C"
+pane = "agent C"
+type = "aq run -- ./test.sh"
+hold = 0.3
+[[step]]
+focus = "aq status --top"
+wait = "queued 1"
+say = "Heavy work waits its turn."
+hold = 2.0
+[[step]]
+focus = "agent B"
+wait = "reused"
+hold = 1.5
+[[step]]
+focus = "full"
+wait = '"ok"[\s\S]*"ok"[\s\S]*"ok"'
+hold = 1.0
