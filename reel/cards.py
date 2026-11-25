@@ -14,7 +14,7 @@ CHROME_CANDIDATES = [
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
 ]
 
-FONT = "-apple-system, 'SF Pro Display', 'Helvetica Neue', Inter, sans-serif"
+FONT = "-apple-system, 'SF Pro Display', 'Helvetica Neue', Inter, 'PingFang SC', 'Hiragino Sans GB', sans-serif"
 
 
 def chrome() -> str:
@@ -104,14 +104,16 @@ html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;position:relative}}
 def stat_card(out: Path, lines: list, accent: list, w=1920, h=1080):
     """A results card: one large line per figure over the backdrop, e.g. "Builds run: 3 → 1"."""
     css, markup = backdrop(accent, w)
-    rows = "".join(f"<p>{html.escape(t)}</p>" for t in lines)
+    # Long lines (a tagline) wrap inside the frame, centred, a size smaller than short figures.
+    rows = "".join(f'<p class="{"long" if len(t) > 32 else ""}">{html.escape(t)}</p>' for t in lines)
     page = f"""<!doctype html><meta charset="utf-8"><style>
 html,body{{margin:0;width:{w}px;height:{h}px;overflow:hidden;position:relative}}
 {css}
 .s{{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
 font-family:{FONT};color:#fff;font-variant-numeric:tabular-nums}}
 .s p{{font-size:{int(h * 0.075)}px;font-weight:700;letter-spacing:-0.01em;margin:{int(h * 0.018)}px 0;
-text-shadow:0 6px 30px rgba(0,0,0,.35)}}
+max-width:{int(w * 0.8)}px;text-align:center;text-shadow:0 6px 30px rgba(0,0,0,.35)}}
+.s p.long{{font-size:{int(h * 0.05)}px;font-weight:600;opacity:.92}}
 </style>{markup}<div class="s">{rows}</div>"""
     _shot(page, out, w, h)
 

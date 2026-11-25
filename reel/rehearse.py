@@ -25,7 +25,7 @@ from . import check
 from .record_terminal import COLS, ROWS, RecordError, _DeviceRecorders, _bash, workdir, write_rc
 
 POLL = 0.25
-WAIT_LIMIT = 900   # seconds a rehearsal waits for one step (a cold Xcode build takes minutes)
+WAIT_LIMIT = 300   # seconds a rehearsal waits for one step (a cold Xcode build takes about 3 minutes)
 TIMEOUT_FACTOR, TIMEOUT_PAD, TIMEOUT_MIN = 3.0, 10.0, 30.0
 
 

@@ -5,7 +5,7 @@
 # binary goes first on PATH (same version; found with `rustup which cargo`).
 set -euo pipefail
 demo=${1:?workdir}
-mkdir -p "$demo/cargo"
+rm -rf "$demo" && mkdir -p "$demo/cargo"  # a reset: each rehearsal and take starts from nothing
 real=$(rustup which cargo 2>/dev/null || command -v cargo)
 cat > "$demo/env" <<ENV
 export PATH=$(dirname "$real"):\$PATH CARGO_HOME=$demo/cargo CARGO_INSTALL_ROOT=$demo/cargo
